@@ -34,25 +34,36 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     """Create a JWT access token"""
     to_encode = data.copy()
     
+    # Use UTC for JWT expiration
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = get_ist_now() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = get_ist_now() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
+    # JWT expects Unix timestamp
     to_encode.update({"exp": expire})
+    print(f"Creating token with SECRET_KEY: {settings.SECRET_KEY[:10]}...")
+    print(f"Token data: {data}")
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    print(f"Generated token (first 20 chars): {encoded_jwt[:20]}...")
     return encoded_jwt
 
 
 def verify_token(token: str) -> dict:
     """Verify and decode a JWT token"""
     try:
+        print(f"SECRET_KEY being used: {settings.SECRET_KEY[:10]}...")
+        print(f"ALGORITHM: {settings.ALGORITHM}")
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
-    except JWTError:
+    except JWTError as e:
+        # Log the actual error for debugging
+        print(f"JWT Error: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail=f"Could not validate credentials: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -63,6 +74,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     Returns user info with role (super_admin or admin).
     """
     token = credentials.credentials
+    print(f"Received token (first 20 chars): {token[:20]}...")
+    print(f"Token length: {len(token)}")
+    
     payload = verify_token(token)
     
     username: str = payload.get("sub")

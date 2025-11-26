@@ -4,6 +4,7 @@ from core.config import settings
 from db.session import init_db
 from api.admin.routes_admin import router as admin_router
 from api.client.routes_client import router as client_router
+from api.client.routes_eta import router as eta_router
 
 # Create FastAPI application
 app = FastAPI(
@@ -26,6 +27,7 @@ app.add_middleware(
 # Include routers
 app.include_router(admin_router, prefix="/api")
 app.include_router(client_router, prefix="/api")
+app.include_router(eta_router, prefix="/api/client")
 
 
 @app.on_event("startup")
@@ -36,6 +38,7 @@ async def startup_event():
     print(f"✅ {settings.APP_NAME} v{settings.APP_VERSION} started")
     print(f"📍 Admin endpoints: /api/admin/*")
     print(f"📍 Client endpoints: /api/client/*")
+    print(f"📍 ETA endpoints: /api/client/eta/*")
 
 
 @app.get("/")

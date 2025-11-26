@@ -28,15 +28,23 @@ async def get_available_vehicles(db: Session) -> List[VehiclePublic]:
 async def get_vehicle_live_location(db: Session, vehicle_id: int) -> VehicleLocation:
     """
     Get real-time location for a specific vehicle.
+    Only returns data for vehicles with active schedules.
     Fetches live data from GPS API and updates cache.
     """
+    # Security check: Only expose vehicles with active schedules
+    active_schedules = crud.get_active_schedules(db)
+    vehicle_ids_with_active_schedules = {s.vehicle_id for s in active_schedules}
+    
+    if vehicle_id not in vehicle_ids_with_active_schedules:
+        raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
+    
     vehicle = crud.get_vehicle(db, vehicle_id)
     
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")
     
     if not vehicle.is_active:
-        raise HTTPException(status_code=403, detail="Vehicle not available")
+        raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
     
     try:
         # Fetch live GPS data
@@ -75,14 +83,22 @@ async def get_vehicle_live_location(db: Session, vehicle_id: int) -> VehicleLoca
 async def get_vehicle_live_status(db: Session, vehicle_id: int) -> VehicleStatus:
     """
     Get operational status for a specific vehicle.
+    Only returns data for vehicles with active schedules.
     """
+    # Security check: Only expose vehicles with active schedules
+    active_schedules = crud.get_active_schedules(db)
+    vehicle_ids_with_active_schedules = {s.vehicle_id for s in active_schedules}
+    
+    if vehicle_id not in vehicle_ids_with_active_schedules:
+        raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
+    
     vehicle = crud.get_vehicle(db, vehicle_id)
     
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")
     
     if not vehicle.is_active:
-        raise HTTPException(status_code=403, detail="Vehicle not available")
+        raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
     
     try:
         # Fetch live GPS data
