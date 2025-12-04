@@ -108,15 +108,6 @@ async def get_current_user(
     if access_token:
         token = access_token
         logger.debug(f"Authentication via cookie for {request.method} {request.url.path}")
-        # For state-changing operations, verify CSRF token
-        if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
-            csrf_token = request.headers.get("X-CSRF-Token")
-            if not csrf_token:
-                logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="CSRF token is required for this operation. Please include X-CSRF-Token header."
-                )
     # Fallback to bearer token for backwards compatibility
     elif credentials:
         token = credentials.credentials
@@ -132,17 +123,68 @@ async def get_current_user(
     
     payload = verify_token(token)
     
-    # Verify CSRF token if present in JWT and provided in header
+    # Verify CSRF token for cookie-based auth on state-changing operations
     if access_token and request.method in ["POST", "PUT", "PATCH", "DELETE"]:
         jwt_csrf = payload.get("csrf")
-        header_csrf = request.headers.get("X-CSRF-Token")
-        if jwt_csrf and jwt_csrf != header_csrf:
-            logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="CSRF token is invalid or has expired. Please logout and login again."
-            )
+        header_csrf = request.headers.get("X-CSRF-Token") or request.headers.get("x-csrf-token")
+        
+        # Only enforce CSRF if JWT has a csrf token (cookie-based auth)
+        if jwt_csrf:
+            if not header_csrf:
+                logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="CSRF token is required. Please include X-CSRF-Token header."
+                )
+            if jwt_csrf != header_csrf:
+                logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="CSRF token is invalid or has expired. Please logout and login again."
+                )
     
+    username: str = payload.get("sub")
+    role: str = payload.get("role", "admin")
+    
+    if username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return {"username": username, "role": role, "csrf_token": payload.get("csrf")}
+
+
+async def get_current_user_no_csrf(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> dict:
+    """
+    Dependency to get the current authenticated user WITHOUT CSRF validation.
+    Use this for low-risk operations like logout or GET requests.
+    """
+    token = None
+    
+    # Try cookie first (preferred method)
+    if access_token:
+        token = access_token
+        logger.debug(f"Authentication via cookie for {request.method} {request.url.path}")
+    # Fallback to bearer token for backwards compatibility
+    elif credentials:
+        token = credentials.credentials
+        logger.debug(f"Authentication via Bearer token for {request.method} {request.url.path}")
+    
+    if not token:
+        logger.warning(f"No authentication credentials provided for {request.method} {request.url.path}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please login to access this resource.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    payload = verify_token(token)
     username: str = payload.get("sub")
     role: str = payload.get("role", "admin")
     

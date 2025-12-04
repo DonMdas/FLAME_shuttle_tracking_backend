@@ -22,8 +22,13 @@ app = FastAPI(
 # Configure CORS
 # Note: When allow_credentials=True, allow_origins cannot be ["*"]
 # Either use specific origins or set allow_credentials=False
+print(f"🔍 CORS Configuration:")
+print(f"   CORS_ORIGINS from .env: {settings.CORS_ORIGINS}")
+print(f"   Parsed origins list: {settings.cors_origins_list}")
+
 if settings.cors_origins_list == ["*"]:
     # For development: allow all origins without credentials
+    print(f"   Mode: Wildcard (allow_credentials=False)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -34,6 +39,7 @@ if settings.cors_origins_list == ["*"]:
     )
 else:
     # For production: specific origins with credentials
+    print(f"   Mode: Specific origins (allow_credentials=True)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -42,6 +48,8 @@ else:
         allow_headers=["*"],
         expose_headers=["*"],
     )
+
+print(f"✅ CORS middleware configured successfully")
 
 
 # Global exception handlers

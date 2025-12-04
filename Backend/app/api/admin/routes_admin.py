@@ -7,7 +7,8 @@ from app.db.session import get_db
 from app.core.security import (
     authenticate_user, 
     create_access_token, 
-    get_current_user, 
+    get_current_user,
+    get_current_user_no_csrf,
     get_super_admin,
     get_password_hash,
     generate_csrf_token
@@ -104,10 +105,11 @@ async def admin_login(credentials: AdminLogin, response: Response, db: Session =
 
 
 @router.post("/logout")
-async def admin_logout(response: Response, current_user: dict = Depends(get_current_user)):
+async def admin_logout(response: Response, current_user: dict = Depends(get_current_user_no_csrf)):
     """
     Admin logout endpoint.
     Clears the HTTP-only cookie.
+    Note: CSRF validation is disabled for logout since it's a low-risk operation.
     """
     try:
         username = current_user.get("username", "unknown")
