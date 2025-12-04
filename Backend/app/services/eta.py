@@ -14,12 +14,12 @@ from sqlalchemy.orm import Session
 
 from core.route_config import (
     Station, STATIONS, ROUTE_DEFINITIONS,
-    get_route_by_locations, get_route_stops,
+    get_route_stops, get_route_direction,
     haversine_distance, find_nearest_station
 )
 from services.osrm import osrm_service
 from schemas.eta import Stop, StopWithETA
-from db.models import Vehicle, Schedule
+from app.db.models import Vehicle, Schedule
 
 
 class ETAService:
@@ -63,22 +63,21 @@ class ETAService:
         age_seconds = (now_utc - location_timestamp).total_seconds()
         is_stale = age_seconds > self.stale_threshold_seconds
         
-        # Get route information from schedule
-        route_def = get_route_by_locations(schedule.from_location, schedule.to_location)
+        # Get route information from schedule's route_id
+        route_id = schedule.route_id
         
-        if not route_def:
-            # Route not found in our definitions
+        # Validate route exists in our definitions
+        if route_id not in ROUTE_DEFINITIONS:
             return {
-                "route_id": "unknown",
-                "direction": f"{schedule.from_location} → {schedule.to_location}",
+                "route_id": route_id,
+                "direction": "Unknown Route",
                 "upcoming_stops": [],
                 "off_route": True,
                 "stale": is_stale,
-                "error": "Route not defined in system"
+                "error": f"Route '{route_id}' not found in route definitions"
             }
         
-        route_id = route_def["route_id"]
-        direction = route_def["name"]
+        direction = get_route_direction(route_id)
         
         # Get ordered stops for this route
         route_stops = get_route_stops(route_id)

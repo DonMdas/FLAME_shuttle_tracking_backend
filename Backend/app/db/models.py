@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Foreig
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timezone, timedelta
-from db.session import Base
+from .session import Base
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -32,7 +32,8 @@ class Admin(Base):
 
 class Vehicle(Base):
     """
-    Vehicle model - stores vehicle information and GPS device tokens.
+    Vehicle model - stores vehicle information synced from EERA API.
+    Vehicles are automatically synced from the API, not manually added.
     """
     __tablename__ = "vehicles"
     
@@ -42,21 +43,24 @@ class Vehicle(Base):
     name = Column(String(100), nullable=False, index=True)
     label = Column(String(255), nullable=True)
     
-    # Device information
+    # Device information (from EERA API)
     device_unique_id = Column(String(50), unique=True, nullable=False, index=True)
-    access_token = Column(String(500), nullable=False)
+    company_name = Column(String(100), nullable=True)
     
-    # Status
+    # Status (admin controlled)
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Metadata
     created_at = Column(DateTime(timezone=True), default=get_ist_now)
     updated_at = Column(DateTime(timezone=True), default=get_ist_now, onupdate=get_ist_now)
     
-    # Cached location data
+    # Cached location data (from API)
     last_latitude = Column(Float, nullable=True)
     last_longitude = Column(Float, nullable=True)
-    last_updated = Column(DateTime(timezone=True), nullable=True)
+    last_speed = Column(Float, nullable=True)  # Speed in km/h from API
+    last_fix_time = Column(DateTime(timezone=True), nullable=True)  # When GPS location was recorded
+    last_server_time = Column(DateTime(timezone=True), nullable=True)  # When server received data
+    last_updated = Column(DateTime(timezone=True), nullable=True)  # When we last fetched from API
     
     # Relationship
     schedules = relationship("Schedule", back_populates="vehicle", cascade="all, delete-orphan")
@@ -68,7 +72,7 @@ class Vehicle(Base):
 class Schedule(Base):
     """
     Schedule model - stores route schedules for vehicles.
-    Admin creates schedules linking vehicles to routes with timing.
+    Admin creates schedules linking vehicles to predefined routes with timing.
     Only active schedules are visible to users.
     """
     __tablename__ = "schedules"
@@ -78,8 +82,7 @@ class Schedule(Base):
     
     # Schedule details
     start_time = Column(DateTime(timezone=True), nullable=False)
-    from_location = Column(String(255), nullable=False)
-    to_location = Column(String(255), nullable=False)
+    route_id = Column(String(100), nullable=False, index=True)  # References ROUTE_DEFINITIONS in route_config.py
     
     # Status
     is_active = Column(Boolean, default=True, nullable=False)
@@ -92,4 +95,4 @@ class Schedule(Base):
     vehicle = relationship("Vehicle", back_populates="schedules")
     
     def __repr__(self):
-        return f"<Schedule {self.from_location} → {self.to_location} (Vehicle {self.vehicle_id})>"
+        return f"<Schedule {self.route_id} @ {self.start_time} (Vehicle {self.vehicle_id})>"

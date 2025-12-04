@@ -47,32 +47,46 @@ class VehicleBase(BaseModel):
 
 
 class VehicleCreate(VehicleBase):
-    """Schema for creating a vehicle (admin only)"""
+    """
+    Schema for creating a vehicle (DEPRECATED - vehicles are now synced from API)
+    """
     device_unique_id: str
-    access_token: str
+    company_name: Optional[str] = None
 
 
 class VehicleUpdate(BaseModel):
-    """Schema for updating a vehicle (admin only)"""
-    name: Optional[str] = None
+    """Schema for updating a vehicle (admin can only update label and is_active)"""
     label: Optional[str] = None
-    access_token: Optional[str] = None
     is_active: Optional[bool] = None
 
 
 class VehicleAdmin(VehicleBase):
-    """Full vehicle schema (admin view - includes sensitive data)"""
+    """Full vehicle schema (admin view - includes all data)"""
     vehicle_id: int
     device_unique_id: str
-    access_token: str
+    company_name: Optional[str] = None
     last_latitude: Optional[float] = None
     last_longitude: Optional[float] = None
+    last_speed: Optional[float] = None
+    last_fix_time: Optional[datetime] = None
+    last_server_time: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
+
+
+class VehicleSyncResponse(BaseModel):
+    """Response from vehicle sync operation"""
+    success: bool
+    vehicles_synced: Optional[int] = None
+    new_vehicles: Optional[int] = None
+    updated_vehicles: Optional[int] = None
+    timestamp: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
 
 
 class VehiclePublic(BaseModel):
@@ -82,6 +96,7 @@ class VehiclePublic(BaseModel):
     label: Optional[str] = None
     last_latitude: Optional[float] = None
     last_longitude: Optional[float] = None
+    last_speed: Optional[float] = None
     last_updated: Optional[datetime] = None
     
     class Config:
@@ -94,8 +109,7 @@ class ScheduleBase(BaseModel):
     """Base schedule schema"""
     vehicle_id: int
     start_time: datetime
-    from_location: str
-    to_location: str
+    route_id: str  # Must match a route_id from ROUTE_DEFINITIONS in route_config.py
     is_active: bool = True
 
 
@@ -108,8 +122,7 @@ class ScheduleUpdate(BaseModel):
     """Schema for updating a schedule (admin only)"""
     vehicle_id: Optional[int] = None
     start_time: Optional[datetime] = None
-    from_location: Optional[str] = None
-    to_location: Optional[str] = None
+    route_id: Optional[str] = None  # Must match a route_id from ROUTE_DEFINITIONS
     is_active: Optional[bool] = None
 
 

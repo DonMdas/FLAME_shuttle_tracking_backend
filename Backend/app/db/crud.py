@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
-from db.models import Vehicle, Admin, Schedule
+from .models import Vehicle, Admin, Schedule
 from schemas.vehicle import VehicleCreate, VehicleUpdate, ScheduleCreate, ScheduleUpdate
 
 # IST timezone (UTC+5:30)
@@ -95,13 +95,141 @@ def get_vehicles_with_active_schedules(db: Session) -> List[Vehicle]:
     ).distinct().all()
 
 
+def sync_vehicle_from_api(db: Session, api_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sync a single vehicle from EERA API data.
+    Creates new vehicle if doesn't exist, updates if exists.
+    
+    Args:
+        db: Database session
+        api_data: Vehicle data from EERA API
+        
+    Returns:
+        Dict with keys: vehicle, created (bool), updated (bool)
+    """
+    device_id = api_data.get("deviceUniqueId")
+    if not device_id:
+        return {"vehicle": None, "created": False, "updated": False, "error": "No device ID"}
+    
+    # Check if vehicle exists
+    existing = get_vehicle_by_device_id(db, device_id)
+    
+    # Parse timestamps
+    fix_time = None
+    server_time = None
+    
+    if api_data.get("fixTime"):
+        try:
+            fix_time = datetime.fromisoformat(api_data["fixTime"].replace('Z', '+00:00'))
+        except:
+            pass
+    
+    if api_data.get("serverTime"):
+        try:
+            server_time = datetime.fromisoformat(api_data["serverTime"].replace('Z', '+00:00'))
+        except:
+            pass
+    
+    if existing:
+        # Update existing vehicle (only metadata, not location - location is fetched live)
+        existing.name = api_data.get("name", existing.name)
+        existing.company_name = api_data.get("companyName")
+        existing.last_updated = get_ist_now()
+        
+        # Optionally update cached location if provided
+        if api_data.get("latitude") is not None:
+            existing.last_latitude = api_data.get("latitude")
+            existing.last_longitude = api_data.get("longitude")
+            existing.last_speed = api_data.get("speed")
+            existing.last_fix_time = fix_time
+            existing.last_server_time = server_time
+        
+        db.commit()
+        db.refresh(existing)
+        
+        return {"vehicle": existing, "created": False, "updated": True}
+    else:
+        # Create new vehicle
+        new_vehicle = Vehicle(
+            name=api_data.get("name", device_id),
+            device_unique_id=device_id,
+            company_name=api_data.get("companyName"),
+            is_active=True,  # Default to active, admin can change later
+            last_latitude=api_data.get("latitude"),
+            last_longitude=api_data.get("longitude"),
+            last_speed=api_data.get("speed"),
+            last_fix_time=fix_time,
+            last_server_time=server_time,
+            last_updated=get_ist_now()
+        )
+        
+        db.add(new_vehicle)
+        db.commit()
+        db.refresh(new_vehicle)
+        
+        return {"vehicle": new_vehicle, "created": True, "updated": False}
+
+
+def update_vehicle_from_live_data(
+    db: Session,
+    vehicle_id: int,
+    api_data: Dict[str, Any]
+) -> Optional[Vehicle]:
+    """
+    Update vehicle with live data from API (location, speed, etc.)
+    This is called when frontend requests live data.
+    
+    Args:
+        db: Database session
+        vehicle_id: Vehicle ID
+        api_data: Live data from EERA API
+        
+    Returns:
+        Updated vehicle or None
+    """
+    db_vehicle = get_vehicle(db, vehicle_id)
+    if not db_vehicle:
+        return None
+    
+    # Parse timestamps
+    fix_time = None
+    server_time = None
+    
+    if api_data.get("fixTime"):
+        try:
+            fix_time = datetime.fromisoformat(api_data["fixTime"].replace('Z', '+00:00'))
+        except:
+            pass
+    
+    if api_data.get("serverTime"):
+        try:
+            server_time = datetime.fromisoformat(api_data["serverTime"].replace('Z', '+00:00'))
+        except:
+            pass
+    
+    # Update cached data
+    db_vehicle.last_latitude = api_data.get("latitude")
+    db_vehicle.last_longitude = api_data.get("longitude")
+    db_vehicle.last_speed = api_data.get("speed")
+    db_vehicle.last_fix_time = fix_time
+    db_vehicle.last_server_time = server_time
+    db_vehicle.last_updated = get_ist_now()
+    
+    db.commit()
+    db.refresh(db_vehicle)
+    return db_vehicle
+
+
 def create_vehicle(db: Session, vehicle: VehicleCreate) -> Vehicle:
-    """Create a new vehicle"""
+    """
+    Create a new vehicle (deprecated - vehicles are now synced from API)
+    Kept for backward compatibility if needed.
+    """
     db_vehicle = Vehicle(
         name=vehicle.name,
         label=vehicle.label,
         device_unique_id=vehicle.device_unique_id,
-        access_token=vehicle.access_token,
+        company_name=vehicle.company_name if hasattr(vehicle, 'company_name') else None,
         is_active=vehicle.is_active
     )
     db.add(db_vehicle)
@@ -142,7 +270,10 @@ def update_vehicle_location(
     latitude: float,
     longitude: float
 ) -> Optional[Vehicle]:
-    """Update cached location for a vehicle"""
+    """
+    Update cached location for a vehicle (deprecated)
+    Use update_vehicle_from_live_data instead.
+    """
     db_vehicle = get_vehicle(db, vehicle_id)
     if not db_vehicle:
         return None
@@ -183,8 +314,7 @@ def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
     db_schedule = Schedule(
         vehicle_id=schedule.vehicle_id,
         start_time=schedule.start_time,
-        from_location=schedule.from_location,
-        to_location=schedule.to_location,
+        route_id=schedule.route_id,
         is_active=schedule.is_active
     )
     db.add(db_schedule)

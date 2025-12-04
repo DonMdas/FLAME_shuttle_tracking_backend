@@ -4,7 +4,7 @@ OSRM (Open Source Routing Machine) service for routing and ETA calculations.
 This service handles all interactions with the OSRM API, including:
 - Route calculations
 - Distance matrix (table) calculations
-- Error handling and fallback logic
+- Error handling and fallback logic with dynamic speed from GPS API
 - Rate limiting and caching
 """
 
@@ -252,32 +252,70 @@ class OSRMService:
         self,
         origin: Tuple[float, float],
         destination: Tuple[float, float],
-        profile: str = "driving"
+        profile: str = "driving",
+        current_speed_kmh: Optional[float] = None,
+        data_age_seconds: Optional[float] = None
     ) -> Dict[str, Any]:
         """
-        Calculate fallback ETA using great-circle distance and average speed.
+        Calculate fallback ETA using great-circle distance and speed.
+        
+        Uses actual vehicle speed if available and fresh (< GPS_DATA_STALE_THRESHOLD),
+        otherwise uses fixed average speed.
         
         Args:
             origin: (latitude, longitude) of starting point
             destination: (latitude, longitude) of ending point
             profile: Routing profile for speed selection
+            current_speed_kmh: Current speed from GPS API (km/h), if available
+            data_age_seconds: Age of GPS data in seconds
             
         Returns:
             Dict with estimated duration and distance, marked as fallback
         """
+        from app.core.config import settings
+        
         lat1, lon1 = origin
         lat2, lon2 = destination
         
         distance = haversine_distance(lat1, lon1, lat2, lon2)
-        avg_speed = self.avg_speeds.get(profile, self.avg_speeds["driving"])
-        duration = distance / avg_speed
         
-        logger.debug(f"Using fallback estimate: {distance}m, {int(duration)}s")
+        # Determine which speed to use
+        stale_threshold = settings.GPS_DATA_STALE_THRESHOLD
+        
+        # Use API speed if:
+        # 1. Speed is provided
+        # 2. Speed is > 0 (vehicle is moving)
+        # 3. Data is fresh (< stale_threshold seconds)
+        if (current_speed_kmh is not None and 
+            current_speed_kmh > 0 and 
+            data_age_seconds is not None and 
+            data_age_seconds < stale_threshold):
+            
+            # Convert km/h to m/s
+            speed_ms = current_speed_kmh / 3.6
+            duration = distance / speed_ms
+            source = "estimate_api_speed"
+            
+            logger.debug(f"Using API speed: {current_speed_kmh} km/h, distance: {distance}m, duration: {int(duration)}s")
+        else:
+            # Use fixed average speed as fallback
+            avg_speed = self.avg_speeds.get(profile, self.avg_speeds["driving"])
+            duration = distance / avg_speed
+            source = "estimate_fallback"
+            
+            if current_speed_kmh is not None and current_speed_kmh == 0:
+                logger.debug(f"Vehicle stationary (speed=0), using fixed speed for estimate")
+            elif data_age_seconds is not None and data_age_seconds >= stale_threshold:
+                logger.debug(f"GPS data stale ({data_age_seconds}s old), using fixed speed for estimate")
+            else:
+                logger.debug(f"No API speed available, using fixed speed for estimate")
+            
+            logger.debug(f"Using fallback estimate: {distance}m, {int(duration)}s")
         
         return {
             "duration_seconds": int(duration),
             "distance_meters": int(distance),
-            "source": "estimate_fallback",
+            "source": source,
             "osrm_request": None
         }
 

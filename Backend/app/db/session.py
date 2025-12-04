@@ -30,5 +30,20 @@ def get_db():
 
 def init_db():
     """Initialize database - create all tables"""
-    from db.models import Vehicle, Admin
+    # Import models to register them with Base BEFORE creating tables
+    # This ensures the model classes are defined and registered
+    from .models import Vehicle, Admin, Schedule
+    
+    # Now create all tables
     Base.metadata.create_all(bind=engine)
+    
+    # Verify tables were created
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    print(f"📊 Database tables created: {tables}")
+    
+    if not tables:
+        print("⚠️  Warning: No tables found after create_all()")
+        print(f"   Base.metadata.tables: {list(Base.metadata.tables.keys())}")
+        raise RuntimeError("Failed to create database tables!")

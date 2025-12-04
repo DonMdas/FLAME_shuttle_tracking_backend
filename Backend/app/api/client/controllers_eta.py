@@ -86,12 +86,13 @@ async def get_upcoming_stops_eta(
     
     try:
         # Fetch current location from GPS API
-        device_data = await gps_service.get_device_info(vehicle.access_token)
+        device_data = await gps_service.get_vehicle_info_by_device_id(vehicle.device_unique_id)
         
         current_location = (device_data["latitude"], device_data["longitude"])
+        current_speed_kmh = device_data.get("speed", 0)  # Speed in km/h
         
-        # Parse timestamp
-        timestamp_str = device_data["timestamp"]
+        # Parse timestamps to calculate data age
+        timestamp_str = device_data.get("serverTime") or device_data.get("timestamp")
         try:
             # Try parsing ISO format
             location_timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
@@ -99,13 +100,12 @@ async def get_upcoming_stops_eta(
             # Fallback to current time if parsing fails
             location_timestamp = datetime.now(timezone.utc)
         
+        # Calculate data age
+        now_utc = datetime.now(timezone.utc)
+        data_age_seconds = (now_utc - location_timestamp).total_seconds()
+        
         # Update cached location
-        crud.update_vehicle_location(
-            db,
-            vehicle_id,
-            current_location[0],
-            current_location[1]
-        )
+        crud.update_vehicle_from_live_data(db, vehicle_id, device_data)
         
     except Exception as e:
         raise HTTPException(

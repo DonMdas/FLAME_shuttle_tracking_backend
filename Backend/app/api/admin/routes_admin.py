@@ -4,6 +4,9 @@ from typing import List
 from datetime import timedelta
 
 from app.db.session import get_db
+from app.core.config import settings
+from app.core.logger import logger, log_request, log_success, log_error
+from app.core.route_config import ROUTE_DEFINITIONS, get_all_route_ids
 from app.core.security import (
     authenticate_user, 
     create_access_token, 
@@ -23,6 +26,7 @@ from app.schemas.vehicle import (
     VehicleCreate,
     VehicleUpdate,
     VehicleAdmin,
+    VehicleSyncResponse,
     ScheduleCreate,
     ScheduleUpdate,
     ScheduleResponse
@@ -228,10 +232,25 @@ async def get_all_vehicles(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all vehicles with full details including access tokens.
+    Get all vehicles with full details.
+    Vehicles are automatically synced from EERA API.
     Admin only - requires authentication.
     """
     return await controllers_admin.list_all_vehicles(db)
+
+
+@router.post("/vehicles/sync", response_model=VehicleSyncResponse)
+async def sync_vehicles(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Manually trigger vehicle sync from EERA API.
+    Fetches all vehicles and updates database.
+    Note: Automatic sync runs every 5 minutes in background.
+    Admin only.
+    """
+    return await controllers_admin.sync_vehicles_from_api(db)
 
 
 @router.get("/vehicles/{vehicle_id}", response_model=VehicleAdmin)
@@ -240,22 +259,26 @@ async def get_vehicle(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a specific vehicle by ID. Admin only."""
+    """
+    Get a specific vehicle by ID with live data from API.
+    Admin only.
+    """
     return await controllers_admin.get_vehicle_details(db, vehicle_id)
 
 
-@router.post("/vehicles", response_model=VehicleAdmin, status_code=status.HTTP_201_CREATED)
-async def create_vehicle(
-    vehicle: VehicleCreate,
+@router.patch("/vehicles/{vehicle_id}/active", response_model=VehicleAdmin)
+async def set_vehicle_active(
+    vehicle_id: int,
+    active: bool,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Add a new vehicle to the tracking system.
-    Validates the GPS access token before creating.
+    Toggle vehicle active status.
+    Only active vehicles are visible to clients.
     Admin only.
     """
-    return await controllers_admin.add_vehicle(db, vehicle)
+    return await controllers_admin.toggle_vehicle_active(db, vehicle_id, active)
 
 
 @router.put("/vehicles/{vehicle_id}", response_model=VehicleAdmin)
@@ -265,18 +288,12 @@ async def update_vehicle(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Update vehicle information. Admin only."""
+    """
+    Update vehicle (label and is_active only).
+    Other fields are synced from API.
+    Admin only.
+    """
     return await controllers_admin.modify_vehicle(db, vehicle_id, vehicle)
-
-
-@router.delete("/vehicles/{vehicle_id}")
-async def delete_vehicle(
-    vehicle_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """Remove a vehicle from the system. Admin only."""
-    return await controllers_admin.remove_vehicle(db, vehicle_id)
 
 
 # ============ Vehicle Control ============
@@ -289,21 +306,37 @@ async def test_gps_connection(
 ):
     """
     Test GPS connection for a vehicle.
-    Fetches live data to verify the access token is working.
+    Fetches live data from EERA API.
     Admin only.
     """
     return await controllers_admin.test_vehicle_connection(db, vehicle_id)
 
 
-@router.patch("/vehicles/{vehicle_id}/active")
-async def set_vehicle_active(
-    vehicle_id: int,
-    active: bool,
+# ============ Deprecated Routes (for backward compatibility) ============
+
+@router.post("/vehicles", response_model=VehicleAdmin, status_code=status.HTTP_201_CREATED)
+async def create_vehicle(
+    vehicle: VehicleCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Toggle vehicle active status. Admin only."""
-    return await controllers_admin.toggle_vehicle_active(db, vehicle_id, active)
+    """
+    DEPRECATED: Manual vehicle creation is no longer supported.
+    Use /vehicles/sync instead.
+    """
+    return await controllers_admin.add_vehicle(db, vehicle)
+
+
+@router.delete("/vehicles/{vehicle_id}")
+async def delete_vehicle(
+    vehicle_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    DEPRECATED: Use PATCH /vehicles/{id}/active instead.
+    """
+    return await controllers_admin.remove_vehicle(db, vehicle_id)
 
 
 # ============ Schedule Management ============
@@ -358,6 +391,13 @@ async def create_schedule(
     current_user: dict = Depends(get_current_user)
 ):
     """Create a new schedule. Admin only."""
+    # Verify route_id is valid
+    if schedule.route_id not in ROUTE_DEFINITIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid route_id '{schedule.route_id}'. Valid routes: {', '.join(get_all_route_ids())}"
+        )
+    
     # Verify vehicle exists
     vehicle = crud.get_vehicle(db, schedule.vehicle_id)
     if not vehicle:
@@ -376,6 +416,14 @@ async def update_schedule(
     current_user: dict = Depends(get_current_user)
 ):
     """Update a schedule. Admin only."""
+    # If route_id is being updated, verify it's valid
+    if schedule_update.route_id is not None:
+        if schedule_update.route_id not in ROUTE_DEFINITIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid route_id '{schedule_update.route_id}'. Valid routes: {', '.join(get_all_route_ids())}"
+            )
+    
     # If vehicle_id is being updated, verify it exists
     if schedule_update.vehicle_id is not None:
         vehicle = crud.get_vehicle(db, schedule_update.vehicle_id)
@@ -408,6 +456,31 @@ async def delete_schedule(
             detail="Schedule not found"
         )
     return {"message": "Schedule deleted successfully"}
+
+
+# ============ Route Definitions (Read-Only) ============
+
+@router.get("/routes")
+async def get_available_routes(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all available route definitions for creating schedules.
+    Admin only.
+    
+    Returns list of routes with their IDs, names, and stops.
+    """
+    routes = []
+    for route_id, route_def in ROUTE_DEFINITIONS.items():
+        routes.append({
+            "route_id": route_id,
+            "name": route_def["name"],
+            "from_location": route_def["from_location"],
+            "to_location": route_def["to_location"],
+            "stops": route_def["stops"]
+        })
+    return {"routes": routes}
+
 
 
 @router.patch("/schedules/{schedule_id}/active")

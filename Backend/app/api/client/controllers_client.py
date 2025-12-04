@@ -29,7 +29,7 @@ async def get_vehicle_live_location(db: Session, vehicle_id: int) -> VehicleLoca
     """
     Get real-time location for a specific vehicle.
     Only returns data for vehicles with active schedules.
-    Fetches live data from GPS API and updates cache.
+    Fetches live data from GPS API every time (called by frontend every 3-5 seconds).
     """
     # Security check: Only expose vehicles with active schedules
     active_schedules = crud.get_active_schedules(db)
@@ -47,16 +47,11 @@ async def get_vehicle_live_location(db: Session, vehicle_id: int) -> VehicleLoca
         raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
     
     try:
-        # Fetch live GPS data
-        device_data = await gps_service.get_device_info(vehicle.access_token)
+        # Fetch live GPS data from API
+        device_data = await gps_service.get_vehicle_info_by_device_id(vehicle.device_unique_id)
         
         # Update cached location
-        crud.update_vehicle_location(
-            db,
-            vehicle_id,
-            device_data["latitude"],
-            device_data["longitude"]
-        )
+        crud.update_vehicle_from_live_data(db, vehicle_id, device_data)
         
         # Return location data
         attributes = device_data.get("attributes", {})
@@ -84,6 +79,7 @@ async def get_vehicle_live_status(db: Session, vehicle_id: int) -> VehicleStatus
     """
     Get operational status for a specific vehicle.
     Only returns data for vehicles with active schedules.
+    Fetches live data from GPS API.
     """
     # Security check: Only expose vehicles with active schedules
     active_schedules = crud.get_active_schedules(db)
@@ -101,8 +97,8 @@ async def get_vehicle_live_status(db: Session, vehicle_id: int) -> VehicleStatus
         raise HTTPException(status_code=404, detail="Vehicle not found or not currently available")
     
     try:
-        # Fetch live GPS data
-        device_data = await gps_service.get_device_info(vehicle.access_token)
+        # Fetch live GPS data from API
+        device_data = await gps_service.get_vehicle_info_by_device_id(vehicle.device_unique_id)
         attributes = device_data.get("attributes", {})
         
         return VehicleStatus(

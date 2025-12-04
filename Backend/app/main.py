@@ -9,6 +9,7 @@ from app.db.session import init_db
 from app.api.admin.routes_admin import router as admin_router
 from app.api.client.routes_client import router as client_router
 from app.api.client.routes_eta import router as eta_router
+from app.services.vehicle_sync import vehicle_sync_service
 
 # Create FastAPI application
 app = FastAPI(
@@ -22,13 +23,13 @@ app = FastAPI(
 # Configure CORS
 # Note: When allow_credentials=True, allow_origins cannot be ["*"]
 # Either use specific origins or set allow_credentials=False
-print(f"🔍 CORS Configuration:")
-print(f"   CORS_ORIGINS from .env: {settings.CORS_ORIGINS}")
-print(f"   Parsed origins list: {settings.cors_origins_list}")
+logger.info("🔍 CORS Configuration:")
+logger.info(f"   CORS_ORIGINS from .env: {settings.CORS_ORIGINS}")
+logger.info(f"   Parsed origins list: {settings.cors_origins_list}")
 
 if settings.cors_origins_list == ["*"]:
     # For development: allow all origins without credentials
-    print(f"   Mode: Wildcard (allow_credentials=False)")
+    logger.info("   Mode: Wildcard (allow_credentials=False)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -39,7 +40,7 @@ if settings.cors_origins_list == ["*"]:
     )
 else:
     # For production: specific origins with credentials
-    print(f"   Mode: Specific origins (allow_credentials=True)")
+    logger.info("   Mode: Specific origins (allow_credentials=True)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -49,7 +50,30 @@ else:
         expose_headers=["*"],
     )
 
-print(f"✅ CORS middleware configured successfully")
+logger.info("✅ CORS middleware configured successfully")
+
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests"""
+    # Log request details
+    logger.info(f"📥 {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    
+    # Log headers for debugging CORS
+    if request.method == "OPTIONS":
+        origin = request.headers.get("origin", "no-origin")
+        logger.info(f"   CORS Preflight - Origin: {origin}")
+        logger.info(f"   Access-Control-Request-Method: {request.headers.get('access-control-request-method', 'none')}")
+        logger.info(f"   Access-Control-Request-Headers: {request.headers.get('access-control-request-headers', 'none')}")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Log response
+    logger.info(f"📤 {request.method} {request.url.path} → {response.status_code}")
+    
+    return response
 
 
 # Global exception handlers
@@ -111,7 +135,7 @@ app.include_router(eta_router, prefix="/api/client")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database and start background services on startup"""
     try:
         logger.info("=" * 60)
         logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
@@ -119,6 +143,11 @@ async def startup_event():
         
         init_db()
         logger.info("✅ Database initialized successfully")
+        
+        # Start vehicle sync background service
+        await vehicle_sync_service.start()
+        logger.info(f"✅ Vehicle sync service started (interval: {settings.VEHICLE_SYNC_INTERVAL}s)")
+        
         logger.info(f"✅ Debug mode: {settings.DEBUG}")
         logger.info(f"📍 Admin endpoints: /api/admin/*")
         logger.info(f"📍 Client endpoints: /api/client/*")
@@ -128,6 +157,7 @@ async def startup_event():
         
         # Console output for quick visibility
         print("✅ Database initialized")
+        print(f"✅ Vehicle sync service started ({settings.VEHICLE_SYNC_INTERVAL}s interval)")
         print(f"✅ {settings.APP_NAME} v{settings.APP_VERSION} started")
         print(f"📍 Admin endpoints: /api/admin/*")
         print(f"📍 Client endpoints: /api/client/*")
@@ -145,6 +175,10 @@ async def shutdown_event():
     logger.info("=" * 60)
     logger.info(f"Shutting down {settings.APP_NAME}")
     logger.info("=" * 60)
+    
+    # Stop background services
+    await vehicle_sync_service.stop()
+    logger.info("✅ Vehicle sync service stopped")
 
 
 @app.get("/")

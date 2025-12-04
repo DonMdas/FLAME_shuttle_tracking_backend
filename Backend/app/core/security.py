@@ -130,18 +130,24 @@ async def get_current_user(
         
         # Only enforce CSRF if JWT has a csrf token (cookie-based auth)
         if jwt_csrf:
-            if not header_csrf:
-                logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="CSRF token is required. Please include X-CSRF-Token header."
-                )
-            if jwt_csrf != header_csrf:
-                logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="CSRF token is invalid or has expired. Please logout and login again."
-                )
+            # Skip CSRF validation in DEBUG mode for Swagger UI testing
+            if settings.DEBUG:
+                if not header_csrf:
+                    logger.debug(f"CSRF check skipped (DEBUG mode) for {request.method} {request.url.path}")
+            else:
+                # Production: enforce CSRF
+                if not header_csrf:
+                    logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="CSRF token is required. Please include X-CSRF-Token header."
+                    )
+                if jwt_csrf != header_csrf:
+                    logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="CSRF token is invalid or has expired. Please logout and login again."
+                    )
     
     username: str = payload.get("sub")
     role: str = payload.get("role", "admin")
