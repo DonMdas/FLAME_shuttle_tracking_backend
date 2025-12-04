@@ -2,13 +2,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
-from fastapi import Depends, HTTPException, status
+import secrets
+from fastapi import Depends, HTTPException, status, Cookie, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from core.config import settings
+from app.core.config import settings
+from app.core.logger import logger, log_auth_attempt
 
-# JWT Bearer token scheme
-security = HTTPBearer()
+# JWT Bearer token scheme (for backwards compatibility)
+security = HTTPBearer(auto_error=False)
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -18,9 +20,19 @@ def get_ist_now():
     return datetime.now(IST)
 
 
+def generate_csrf_token() -> str:
+    """Generate a secure CSRF token"""
+    return secrets.token_urlsafe(32)
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    try:
+        result = bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        return result
+    except Exception as e:
+        logger.error(f"Password verification error: {str(e)}")
+        return False
 
 
 def get_password_hash(password: str) -> str:
@@ -30,8 +42,8 @@ def get_password_hash(password: str) -> str:
     return hashed.decode('utf-8')
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token"""
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None, csrf_token: Optional[str] = None) -> str:
+    """Create a JWT access token with optional CSRF token"""
     to_encode = data.copy()
     
     # Use UTC for JWT expiration
@@ -43,41 +55,93 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     
     # JWT expects Unix timestamp
     to_encode.update({"exp": expire})
-    print(f"Creating token with SECRET_KEY: {settings.SECRET_KEY[:10]}...")
-    print(f"Token data: {data}")
+    
+    # Add CSRF token to JWT if provided (for cookie-based auth)
+    if csrf_token:
+        to_encode.update({"csrf": csrf_token})
+    
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    print(f"Generated token (first 20 chars): {encoded_jwt[:20]}...")
     return encoded_jwt
 
 
 def verify_token(token: str) -> dict:
     """Verify and decode a JWT token"""
     try:
-        print(f"SECRET_KEY being used: {settings.SECRET_KEY[:10]}...")
-        print(f"ALGORITHM: {settings.ALGORITHM}")
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
-    except JWTError as e:
-        # Log the actual error for debugging
-        print(f"JWT Error: {str(e)}")
-        print(f"Error type: {type(e).__name__}")
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token verification failed: Token has expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {str(e)}",
+            detail="Token has expired. Please login again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.JWTClaimsError as e:
+        logger.warning(f"Token verification failed: Invalid claims - {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token claims. Please login again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except JWTError as e:
+        logger.warning(f"Token verification failed: {type(e).__name__} - {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials. Please login again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_user(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> dict:
     """
     Dependency to get the current authenticated user.
+    Supports both cookie-based (preferred) and bearer token authentication.
     Returns user info with role (super_admin or admin).
     """
-    token = credentials.credentials
-    print(f"Received token (first 20 chars): {token[:20]}...")
-    print(f"Token length: {len(token)}")
+    token = None
+    
+    # Try cookie first (preferred method)
+    if access_token:
+        token = access_token
+        logger.debug(f"Authentication via cookie for {request.method} {request.url.path}")
+        # For state-changing operations, verify CSRF token
+        if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+            csrf_token = request.headers.get("X-CSRF-Token")
+            if not csrf_token:
+                logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="CSRF token is required for this operation. Please include X-CSRF-Token header."
+                )
+    # Fallback to bearer token for backwards compatibility
+    elif credentials:
+        token = credentials.credentials
+        logger.debug(f"Authentication via Bearer token for {request.method} {request.url.path}")
+    
+    if not token:
+        logger.warning(f"No authentication credentials provided for {request.method} {request.url.path}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please login to access this resource.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     payload = verify_token(token)
+    
+    # Verify CSRF token if present in JWT and provided in header
+    if access_token and request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+        jwt_csrf = payload.get("csrf")
+        header_csrf = request.headers.get("X-CSRF-Token")
+        if jwt_csrf and jwt_csrf != header_csrf:
+            logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF token is invalid or has expired. Please logout and login again."
+            )
     
     username: str = payload.get("sub")
     role: str = payload.get("role", "admin")
@@ -89,7 +153,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    return {"username": username, "role": role}
+    return {"username": username, "role": role, "csrf_token": payload.get("csrf")}
 
 
 async def get_super_admin(current_user: dict = Depends(get_current_user)) -> dict:
@@ -98,9 +162,10 @@ async def get_super_admin(current_user: dict = Depends(get_current_user)) -> dic
     Use this for Super Admin-only endpoints.
     """
     if current_user.get("role") != "super_admin":
+        logger.warning(f"Access denied: User '{current_user.get('username')}' (role: {current_user.get('role')}) attempted to access Super Admin endpoint")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super Admin access required"
+            detail="Super Admin access required. This operation is restricted to Super Admin users only."
         )
     return current_user
 
@@ -110,18 +175,41 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[dic
     Authenticate a user (Super Admin from .env or normal admin from DB).
     Returns user dict with role if authenticated, None otherwise.
     """
-    # Check if it's the Super Admin (from .env)
-    if username == settings.ADMIN_USERNAME and password == settings.ADMIN_PASSWORD:
-        return {"username": username, "role": "super_admin"}
-    
-    # Check database for normal admins
-    from db import crud
-    db_admin = crud.get_admin_by_username(db, username)
-    
-    if db_admin and db_admin.is_active and verify_password(password, db_admin.hashed_password):
-        return {"username": username, "role": "admin"}
-    
-    return None
+    try:
+        # Check if it's the Super Admin (from .env)
+        if username == settings.ADMIN_USERNAME:
+            if password == settings.ADMIN_PASSWORD:
+                log_auth_attempt(username, success=True)
+                logger.info(f"Super Admin '{username}' authenticated successfully")
+                return {"username": username, "role": "super_admin"}
+            else:
+                log_auth_attempt(username, success=False, reason="Invalid password for Super Admin")
+                return None
+        
+        # Check database for normal admins
+        from app.db import crud
+        db_admin = crud.get_admin_by_username(db, username)
+        
+        if not db_admin:
+            log_auth_attempt(username, success=False, reason="Username not found in database")
+            return None
+        
+        if not db_admin.is_active:
+            log_auth_attempt(username, success=False, reason="Account is disabled")
+            logger.warning(f"Login attempt for disabled account: {username}")
+            return None
+        
+        if verify_password(password, db_admin.hashed_password):
+            log_auth_attempt(username, success=True)
+            logger.info(f"Admin '{username}' authenticated successfully")
+            return {"username": username, "role": "admin"}
+        else:
+            log_auth_attempt(username, success=False, reason="Invalid password")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Authentication error for user '{username}': {type(e).__name__} - {str(e)}", exc_info=True)
+        return None
 
 
 def authenticate_admin(username: str, password: str) -> Optional[dict]:

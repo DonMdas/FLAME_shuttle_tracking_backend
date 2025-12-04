@@ -1,18 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import timedelta
 
-from db.session import get_db
-from core.security import (
+from app.db.session import get_db
+from app.core.security import (
     authenticate_user, 
     create_access_token, 
     get_current_user, 
     get_super_admin,
-    get_password_hash
+    get_password_hash,
+    generate_csrf_token
 )
-from core.config import settings
-from schemas.vehicle import (
+from app.core.config import settings
+from app.core.logger import logger, log_request, log_success, log_error
+from app.schemas.vehicle import (
     AdminLogin,
     TokenResponse,
     AdminCreate,
@@ -24,48 +26,114 @@ from schemas.vehicle import (
     ScheduleUpdate,
     ScheduleResponse
 )
-from api.admin import controllers_admin
-from db import crud
+from app.api.admin import controllers_admin
+from app.db import crud
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
 # ============ Authentication ============
 
-@router.post("/login", response_model=TokenResponse)
-async def admin_login(credentials: AdminLogin, db: Session = Depends(get_db)):
+@router.post("/login")
+async def admin_login(credentials: AdminLogin, response: Response, db: Session = Depends(get_db)):
     """
     Admin login endpoint.
     Supports both Super Admin (from .env) and normal admins (from database).
-    Returns a JWT token for authenticated access.
+    Sets HTTP-only cookie with JWT token and returns CSRF token.
     """
-    user = authenticate_user(db, credentials.username, credentials.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        log_request("/admin/login", "POST", credentials.username)
+        
+        # Validate input
+        if not credentials.username or not credentials.password:
+            logger.warning(f"Login attempt with empty credentials")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username and password are required"
+            )
+        
+        # Authenticate user
+        user = authenticate_user(db, credentials.username, credentials.password)
+        if not user:
+            # Generic error message for security (don't reveal if username exists)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password. Please check your credentials and try again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Generate CSRF token
+        csrf_token = generate_csrf_token()
+        
+        # Create access token with CSRF token embedded
+        access_token = create_access_token(
+            data={"sub": user["username"], "role": user["role"]},
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+            csrf_token=csrf_token
         )
-    
-    access_token = create_access_token(
-        data={"sub": user["username"], "role": user["role"]},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
+        
+        # Set HTTP-only cookie
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,  # Cannot be accessed by JavaScript
+            secure=not settings.DEBUG,  # HTTPS only in production
+            samesite="lax",  # CSRF protection
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # in seconds
+            path="/"
+        )
+        
+        log_success("/admin/login", f"User '{user['username']}' logged in as {user['role']}", user["username"])
+        
+        # Return CSRF token to be stored by client and sent in X-CSRF-Token header
+        return {
+            "message": "Login successful",
+            "csrf_token": csrf_token,
+            "username": user["username"],
+            "role": user["role"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/login", e, credentials.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during login. Please try again later."
+        )
 
 
 @router.post("/logout")
-async def admin_logout(current_user: dict = Depends(get_current_user)):
+async def admin_logout(response: Response, current_user: dict = Depends(get_current_user)):
     """
     Admin logout endpoint.
-    Since JWT tokens are stateless, logout is handled client-side by deleting the token.
-    This endpoint simply confirms the token is valid.
+    Clears the HTTP-only cookie.
     """
-    return {
-        "message": "Logged out successfully",
-        "detail": "Please delete the JWT token from client storage"
-    }
+    try:
+        username = current_user.get("username", "unknown")
+        log_request("/admin/logout", "POST", username)
+        
+        # Clear the cookie
+        response.delete_cookie(
+            key="access_token",
+            path="/",
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite="lax"
+        )
+        
+        log_success("/admin/logout", f"User '{username}' logged out successfully", username)
+        
+        return {
+            "message": "Logged out successfully"
+        }
+        
+    except Exception as e:
+        log_error("/admin/logout", e, current_user.get("username", "unknown"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during logout. Please try again."
+        )
 
 
 # ============ Admin Management (Super Admin Only) ============

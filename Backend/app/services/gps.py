@@ -1,7 +1,8 @@
 import httpx
 from typing import Optional, Dict, Any
 from fastapi import HTTPException
-from core.config import settings
+from app.core.config import settings
+from app.core.logger import logger, log_gps_request
 
 
 class GPSService:
@@ -25,6 +26,7 @@ class GPSService:
             HTTPException: If the API request fails
         """
         try:
+            logger.debug(f"Fetching GPS data from EERA API")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     f"{self.base_url}{self.endpoint}",
@@ -36,36 +38,43 @@ class GPSService:
                 
                 # Check if API call was successful
                 if not data.get("successful", False):
+                    error_msg = data.get('message', 'Unknown error')
+                    logger.error(f"EERA API request failed: {error_msg}")
                     raise HTTPException(
                         status_code=400,
-                        detail=f"EERA API request failed: {data.get('message', 'Unknown error')}"
+                        detail=f"GPS service error: {error_msg}. Please check the device access token."
                     )
                 
                 # Validate that we got device data
                 if not data.get("object") or len(data["object"]) == 0:
+                    logger.warning(f"No device data returned from EERA API")
                     raise HTTPException(
                         status_code=404,
-                        detail="No device data found"
+                        detail="No GPS data found for this device. Please verify the device is online."
                     )
                 
+                logger.debug(f"GPS data fetched successfully")
                 return data["object"][0]
                 
         except httpx.TimeoutException:
+            logger.error(f"GPS API request timeout (>10s)")
             raise HTTPException(
                 status_code=504,
-                detail="Request to EERA API timed out"
+                detail="GPS service timeout. The GPS provider is not responding. Please try again later."
             )
         except httpx.HTTPStatusError as e:
+            logger.error(f"GPS API HTTP error {e.response.status_code}: {e.response.text}")
             raise HTTPException(
                 status_code=e.response.status_code,
-                detail=f"EERA API returned error: {e.response.text}"
+                detail=f"GPS service error (HTTP {e.response.status_code}). Please contact support if this persists."
             )
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Unexpected GPS service error: {type(e).__name__} - {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail=f"GPS service error: {str(e)}"
+                detail=f"Unexpected GPS service error. Please try again later."
             )
     
     async def get_location(self, access_token: str) -> Dict[str, Any]:

@@ -12,7 +12,8 @@ import httpx
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime, timedelta
 from fastapi import HTTPException
-from core.route_config import haversine_distance
+from app.core.route_config import haversine_distance
+from app.core.logger import logger, log_osrm_request
 
 
 class OSRMService:
@@ -95,6 +96,7 @@ class OSRMService:
             return cached
         
         try:
+            logger.debug(f"OSRM route request: {origin} -> {destination} ({profile})")
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
@@ -103,16 +105,16 @@ class OSRMService:
                 
                 if data.get("code") != "Ok":
                     # OSRM returned an error
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"OSRM error: {data.get('message', 'No route found')}"
-                    )
+                    error_msg = data.get('message', 'No route found')
+                    logger.warning(f"OSRM route error: {error_msg}")
+                    log_osrm_request(origin, 1, success=False, error=error_msg)
+                    # Use fallback instead of raising error
+                    return self._fallback_estimate(origin, destination, profile)
                 
                 if not data.get("routes") or len(data["routes"]) == 0:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="No route found by OSRM"
-                    )
+                    logger.warning(f"OSRM returned no routes")
+                    log_osrm_request(origin, 1, success=False, error="No routes returned")
+                    return self._fallback_estimate(origin, destination, profile)
                 
                 route = data["routes"][0]
                 result = {
@@ -123,24 +125,27 @@ class OSRMService:
                 
                 # Cache the result
                 self._set_cache(cache_key, result)
+                log_osrm_request(origin, 1, success=True)
                 
                 return result
                 
         except httpx.TimeoutException:
-            # Fallback to estimate
+            logger.warning(f"OSRM route timeout, using fallback estimate")
+            log_osrm_request(origin, 1, success=False, error="Timeout")
             return self._fallback_estimate(origin, destination, profile)
         except httpx.HTTPStatusError as e:
+            logger.error(f"OSRM HTTP error {e.response.status_code}: {e.response.text}")
+            log_osrm_request(origin, 1, success=False, error=f"HTTP {e.response.status_code}")
             if e.response.status_code >= 500:
                 # OSRM server error, use fallback
                 return self._fallback_estimate(origin, destination, profile)
-            raise HTTPException(
-                status_code=503,
-                detail=f"OSRM service error: {e.response.text}"
-            )
+            # Client error, use fallback
+            return self._fallback_estimate(origin, destination, profile)
         except HTTPException:
             raise
         except Exception as e:
-            # Any other error, use fallback
+            logger.error(f"Unexpected OSRM error: {type(e).__name__} - {str(e)}")
+            log_osrm_request(origin, 1, success=False, error=str(e))
             return self._fallback_estimate(origin, destination, profile)
     
     async def get_table(
@@ -266,6 +271,8 @@ class OSRMService:
         distance = haversine_distance(lat1, lon1, lat2, lon2)
         avg_speed = self.avg_speeds.get(profile, self.avg_speeds["driving"])
         duration = distance / avg_speed
+        
+        logger.debug(f"Using fallback estimate: {distance}m, {int(duration)}s")
         
         return {
             "duration_seconds": int(duration),

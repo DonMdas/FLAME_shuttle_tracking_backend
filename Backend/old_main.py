@@ -13,7 +13,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Modify this in production
+    allow_origins=["172.16.19.255:3000"],  # Modify this in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,9 +22,6 @@ app.add_middleware(
 # EERA API configuration
 EERA_BASE_URL = "https://track.eeragpshouse.com"
 EERA_ENDPOINT = "/api/middleMan/getDeviceInfo"
-
-# Hardcoded access token (replace with your actual token)
-DEFAULT_ACCESS_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnpkV0lpT2lJek9UVTNNQ0lzSW1semN5STZJbWR3Y3kxMGNtRmphMlZ5SWl3aWFXRjBJam94TnpNMk9UTTBOamMzZlEuYmdRaGVGY2tCeFVnbTVuN1RGNk5ONWhxVHUxREo1WDZlZjZsQ1F4VFNmRQ=="
 
 
 @app.get("/")
@@ -39,26 +36,23 @@ async def root():
 
 @app.get("/api/vehicle/info", response_model=DeviceInfoResponse)
 async def get_vehicle_info(
-    accessToken: Optional[str] = Query(None, description="Base64-encoded access token for the device")
+    accessToken: str = Query(..., description="Base64-encoded access token for the device")
 ):
     """
     Retrieve real-time vehicle information from EERA GPS tracking system.
     
     Parameters:
-    - accessToken: Base64-encoded token containing device authentication and identifier (optional, uses default if not provided)
+    - accessToken: Base64-encoded token containing device authentication and identifier (required)
     
     Returns:
     - Device information including location, status, motion, battery, and distance metrics
     """
-    # Use default token if not provided
-    token = accessToken or DEFAULT_ACCESS_TOKEN
-    
     try:
         # Make request to EERA API
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{EERA_BASE_URL}{EERA_ENDPOINT}",
-                params={"accessToken": token}
+                params={"accessToken": accessToken}
             )
             response.raise_for_status()
             
@@ -93,21 +87,18 @@ async def get_vehicle_info(
 
 @app.get("/api/vehicle/location")
 async def get_vehicle_location(
-    accessToken: Optional[str] = Query(None, description="Base64-encoded access token for the device")
+    accessToken: str = Query(..., description="Base64-encoded access token for the device")
 ):
     """
     Get simplified vehicle location information.
     
     Returns only the essential location data: coordinates, speed, and timestamp.
     """
-    # Use default token if not provided
-    token = accessToken or DEFAULT_ACCESS_TOKEN
-    
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{EERA_BASE_URL}{EERA_ENDPOINT}",
-                params={"accessToken": token}
+                params={"accessToken": accessToken}
             )
             response.raise_for_status()
             data = response.json()
