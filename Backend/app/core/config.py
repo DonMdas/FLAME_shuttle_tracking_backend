@@ -29,11 +29,14 @@ class Settings(BaseSettings):
     EERA_API_KEY: str  # Single API key for all vehicles
     
     # GPS Configuration
-    GPS_DATA_STALE_THRESHOLD: int = 30  # Seconds - data older than this is considered stale
-    VEHICLE_SYNC_INTERVAL: int = 300  # Seconds - sync vehicle list every 5 minutes
+    GPS_DATA_STALE_THRESHOLD: int   # Seconds - data older than this is considered stale
+    VEHICLE_SYNC_INTERVAL: int   # Seconds - sync vehicle list every 5 minutes
     
     # CORS
     CORS_ORIGINS: str
+    
+    #OSRM_BASE_URL
+    OSRM_BASE_URL : str
     
     @property
     def cors_origins_list(self) -> List[str]:

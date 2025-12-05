@@ -18,9 +18,8 @@ from core.route_config import (
     haversine_distance
 )
 from services.osrm import osrm_service
-from schemas.eta import StopWithETA, Stop, SegmentProgress
+from schemas.eta import StopWithETA
 from app.db.models import Vehicle, Schedule
-from core.logger import logger
 
 
 class ETAService:
@@ -33,9 +32,6 @@ class ETAService:
         self.off_route_threshold_meters = 1000 
         self.arriving_threshold_meters = 100  # Within 100m of stop = arriving
         self.max_stops_limit = 10  # Maximum number of stops to return
-        
-        # Cache for OSRM segment distances (route_id -> {segment_key: distance})
-        self._segment_distance_cache: Dict[str, Dict[str, float]] = {}
     
     async def get_upcoming_stops_eta(
         self,
@@ -114,91 +110,9 @@ class ETAService:
                     ) for s in stops_slice
                 ]
         
-        # 7. Calculate segment progress if vehicle is on route using OSRM distances
-        current_segment = None
-        if not is_off_route_flag and not is_stale and upcoming_stops_list and stops_with_eta:
-            # Find current segment based on full route
-            current_segment_idx = self._find_current_segment(current_location, route_stops)
-            
-            logger.info(f"Segment Progress - current_segment_idx={current_segment_idx}, total_stops={len(route_stops)}")
-            logger.info(f"Segment Progress - upcoming_stops_list={[s.id for s in upcoming_stops_list]}")
-            logger.info(f"Segment Progress - all_route_stops={[s.id for s in route_stops]}")
-            
-            # Segment index tells us vehicle is between stop[i] and stop[i+1]
-            # We need both stops to exist
-            if current_segment_idx >= 0 and current_segment_idx < len(route_stops) - 1:
-                from_station = route_stops[current_segment_idx]
-                to_station = route_stops[current_segment_idx + 1]
-                
-                logger.info(f"Segment Progress - detected segment={from_station.id}->{to_station.id}")
-                
-                # Verify that to_station is actually in upcoming stops (not already passed)
-                # This handles edge case where vehicle is past all stops
-                to_station_in_upcoming = any(s.id == to_station.id for s in upcoming_stops_list)
-                
-                logger.info(f"Segment Progress - to_station_in_upcoming={to_station_in_upcoming}")
-                
-                if to_station_in_upcoming:
-                    # Get OSRM-based total segment distance (cached)
-                    try:
-                        total_distance = await self._get_segment_distance(
-                            route_id,
-                            from_station,
-                            to_station,
-                            mode
-                        )
-                        logger.info(f"Segment Progress - total_distance={total_distance}")
-                        
-                        # Get remaining distance from first stop in ETA results (already OSRM-calculated)
-                        # The first stop in stops_with_eta is the next stop (to_station)
-                        remaining_distance = None
-                        for stop_eta in stops_with_eta:
-                            if stop_eta.stop_id == to_station.id:
-                                # Use OSRM distance if available, otherwise fallback to haversine
-                                if stop_eta.source == "osrm" and stop_eta.distance_meters > 0:
-                                    remaining_distance = float(stop_eta.distance_meters)
-                                break
-                        
-                        logger.info(f"Segment Progress - remaining_distance from ETA={remaining_distance}")
-                        
-                        # Fallback to haversine if OSRM data not available
-                        if remaining_distance is None:
-                            remaining_distance = haversine_distance(
-                                current_location[0], current_location[1],
-                                to_station.lat, to_station.lon
-                            )
-                            logger.info(f"Segment Progress - using haversine fallback={remaining_distance}")
-                        
-                        # Calculate progress ratio (clamped to [0, 1])
-                        progress_ratio = max(0.0, min(1.0, (total_distance - remaining_distance) / total_distance if total_distance > 0 else 0.0))
-                        
-                        logger.info(f"Segment Progress - progress_ratio={progress_ratio}")
-                        
-                        current_segment = SegmentProgress(
-                            from_stop=Stop(
-                                stop_id=from_station.id,
-                                name=from_station.name,
-                                lat=from_station.lat,
-                                lon=from_station.lon
-                            ),
-                            to_stop=Stop(
-                                stop_id=to_station.id,
-                                name=to_station.name,
-                                lat=to_station.lat,
-                                lon=to_station.lon
-                            ),
-                            total_distance_meters=total_distance,
-                            remaining_distance_meters=remaining_distance,
-                            progress_ratio=progress_ratio
-                        )
-                        logger.info(f"Segment Progress - current_segment created successfully")
-                    except Exception as e:
-                        logger.error(f"Segment Progress - Failed to calculate: {e}", exc_info=True)
-        
         return {
             "route_id": route_id,
             "direction": direction,
-            "current_segment": current_segment,
             "upcoming_stops": stops_with_eta,
             "off_route": is_off_route_flag,
             "stale": is_stale
@@ -395,54 +309,6 @@ class ETAService:
         distance = math.sqrt((px - cx)**2 + (py - cy)**2)
         
         return distance, t
-
-    async def _get_segment_distance(
-        self,
-        route_id: str,
-        from_station: Station,
-        to_station: Station,
-        mode: str = "driving"
-    ) -> float:
-        """
-        Get OSRM route distance between two consecutive stops.
-        Uses cache to avoid repeated API calls for same segments.
-        Falls back to haversine if OSRM fails.
-        """
-        # Create cache key
-        segment_key = f"{from_station.id}->{to_station.id}"
-        
-        # Check cache
-        if route_id not in self._segment_distance_cache:
-            self._segment_distance_cache[route_id] = {}
-        
-        if segment_key in self._segment_distance_cache[route_id]:
-            return self._segment_distance_cache[route_id][segment_key]
-        
-        # Calculate using OSRM
-        try:
-            result = await osrm_service.get_route(
-                origin=(from_station.lat, from_station.lon),
-                destination=(to_station.lat, to_station.lon),
-                profile=mode  # Changed from mode= to profile=
-            )
-            
-            if result and result.get("distance", 0) > 0:
-                distance = float(result["distance"])
-                # Cache the result
-                self._segment_distance_cache[route_id][segment_key] = distance
-                return distance
-        except Exception as e:
-            print(f"OSRM failed for segment {segment_key}: {e}")
-        
-        # Fallback to haversine
-        fallback_distance = haversine_distance(
-            from_station.lat, from_station.lon,
-            to_station.lat, to_station.lon
-        )
-        
-        # Cache fallback value too (to avoid repeated failures)
-        self._segment_distance_cache[route_id][segment_key] = fallback_distance
-        return fallback_distance
 
     def _build_error_response(self, route_id, direction, is_stale, error_msg):
         return {

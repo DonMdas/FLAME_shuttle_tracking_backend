@@ -310,7 +310,19 @@ def get_active_schedules(db: Session) -> List[Schedule]:
 
 
 def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
-    """Create a new schedule"""
+    """Create a new schedule. Only one active schedule allowed per vehicle."""
+    # If creating an active schedule, deactivate any existing active schedules for this vehicle
+    if schedule.is_active:
+        existing_active = db.query(Schedule).filter(
+            Schedule.vehicle_id == schedule.vehicle_id,
+            Schedule.is_active == True
+        ).all()
+        
+        if existing_active:
+            # Deactivate all existing active schedules for this vehicle
+            for existing in existing_active:
+                existing.is_active = False
+    
     db_schedule = Schedule(
         vehicle_id=schedule.vehicle_id,
         start_time=schedule.start_time,
@@ -324,12 +336,26 @@ def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
 
 
 def update_schedule(db: Session, schedule_id: int, schedule_update: ScheduleUpdate) -> Optional[Schedule]:
-    """Update a schedule"""
+    """Update a schedule. Only one active schedule allowed per vehicle."""
     db_schedule = get_schedule(db, schedule_id)
     if not db_schedule:
         return None
     
     update_data = schedule_update.dict(exclude_unset=True)
+    
+    # If updating to active, deactivate any other active schedules for this vehicle
+    if update_data.get('is_active') == True:
+        existing_active = db.query(Schedule).filter(
+            Schedule.vehicle_id == db_schedule.vehicle_id,
+            Schedule.is_active == True,
+            Schedule.id != schedule_id  # Exclude current schedule
+        ).all()
+        
+        if existing_active:
+            # Deactivate all other active schedules for this vehicle
+            for existing in existing_active:
+                existing.is_active = False
+    
     for field, value in update_data.items():
         setattr(db_schedule, field, value)
     

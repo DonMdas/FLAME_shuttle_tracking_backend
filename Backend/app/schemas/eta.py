@@ -19,6 +19,15 @@ class Stop(BaseModel):
     lon: float = Field(..., description="Longitude of the stop")
 
 
+class SegmentProgress(BaseModel):
+    """Progress along current route segment for visual display"""
+    from_stop: Stop = Field(..., description="Previous stop (segment start)")
+    to_stop: Stop = Field(..., description="Next stop (segment end)")
+    total_distance_meters: float = Field(..., description="Total distance between the two stops")
+    remaining_distance_meters: float = Field(..., description="Distance from vehicle to next stop")
+    progress_ratio: float = Field(..., description="Progress along segment (0.0 to 1.0)", ge=0, le=1)
+
+
 class StopWithETA(Stop):
     """Stop with ETA information"""
     eta_seconds: int = Field(..., description="Estimated time of arrival in seconds")
@@ -46,6 +55,10 @@ class ETAUpcomingResponse(BaseModel):
     current_location: Coordinate = Field(..., description="Current vehicle location")
     route_id: str = Field(..., description="Active route identifier")
     direction: str = Field(..., description="Direction of travel (from -> to)")
+    current_segment: Optional[SegmentProgress] = Field(
+        None,
+        description="Progress along current route segment for visual display"
+    )
     upcoming_stops: List[StopWithETA] = Field(
         default_factory=list,
         description="List of upcoming stops with ETA"

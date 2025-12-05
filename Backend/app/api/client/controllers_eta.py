@@ -133,6 +133,7 @@ async def get_upcoming_stops_eta(
         ),
         route_id=eta_result.get("route_id", "unknown"),
         direction=eta_result.get("direction", "unknown"),
+        current_segment=eta_result.get("current_segment"),
         upcoming_stops=eta_result.get("upcoming_stops", []),
         stale=eta_result.get("stale", False),
         off_route=eta_result.get("off_route", False)

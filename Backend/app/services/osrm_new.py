@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from app.core.route_config import haversine_distance
 from app.core.logger import logger, log_osrm_request
-from app.core.config import settings
 
 
 class OSRMService:
@@ -24,7 +23,7 @@ class OSRMService:
     
     def __init__(self):
         # OSRM public server
-        self.base_url = settings.OSRM_BASE_URL #"http://localhost:5000" #"http://router.project-osrm.org"
+        self.base_url = "http://router.project-osrm.org"
         
         # Configuration
         self.timeout = 10.0
@@ -157,56 +156,69 @@ class OSRMService:
         destinations: List[Tuple[float, float]],
         profile: str = "driving"
     ) -> List[Dict[str, Any]]:
-
+        """
+        Get distance/duration matrix from origin to multiple destinations using OSRM Table API.
+        
+        Args:
+            origin: (latitude, longitude) of starting point
+            destinations: List of (latitude, longitude) tuples for destinations
+            profile: Routing profile ("driving" or "walking")
+            
+        Returns:
+            List of dicts with keys: duration_seconds, distance_meters, osrm_request
+            One entry per destination in the same order.
+            
+        Raises:
+            HTTPException: If OSRM request fails
+        """
+        # Build coordinate string: origin first, then all destinations
         all_coords = [origin] + destinations
         coords_str = self._build_coords_string(all_coords)
-
+        
+        # Sources=0 (origin), destinations=1,2,3... (all the rest)
         sources = "0"
         destinations_indices = ";".join(str(i) for i in range(1, len(all_coords)))
-
+        
         url = f"{self.base_url}/table/v1/{profile}/{coords_str}"
         params = {
             "sources": sources,
             "destinations": destinations_indices,
             "annotations": "duration,distance"
         }
-
+        
+        # Check cache
         cache_key = f"table:{coords_str}:{profile}"
         cached = self._get_from_cache(cache_key)
         if cached:
             return cached
-
+        
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
-
+                
                 data = response.json()
-
+                
                 if data.get("code") != "Ok":
-                    # LOG ERROR
-                    print(f"[OSRM ERROR] Table API returned non-OK code: {data}")
                     raise HTTPException(
                         status_code=503,
                         detail=f"OSRM error: {data.get('message', 'No route found')}"
                     )
-
-                durations = data.get("durations", [[]])[0]
-                distances = data.get("distances", [[]])[0]
-
+                
+                # Extract durations and distances
+                durations = data.get("durations", [[]])[0]  # First row (from origin)
+                distances = data.get("distances", [[]])[0]  # First row (from origin)
+                
                 if len(durations) != len(destinations) or len(distances) != len(destinations):
-                    # LOG ERROR
-                    print(f"[OSRM ERROR] Incomplete matrix returned: durations={durations}, distances={distances}")
                     raise HTTPException(
                         status_code=503,
                         detail="OSRM returned incomplete matrix"
                     )
-
+                
                 results = []
                 for i, (duration, distance) in enumerate(zip(durations, distances)):
                     if duration is None or distance is None:
-                        # LOG ERROR
-                        print(f"[OSRM WARNING] No route found for destination index {i}: {destinations[i]}")
+                        # No route found for this destination, use fallback
                         fallback = self._fallback_estimate(origin, destinations[i], profile)
                         results.append(fallback)
                     else:
@@ -215,31 +227,29 @@ class OSRMService:
                             "distance_meters": int(distance),
                             "osrm_request": f"{url}?sources={sources}&destinations={destinations_indices}&annotations=duration,distance"
                         })
-
+                
+                # Cache the results
                 self._set_cache(cache_key, results)
+                
                 return results
-
+                
         except httpx.TimeoutException:
-            print(f"[OSRM TIMEOUT] OSRM table request timed out for URL: {url}")
+            # Fallback for all destinations
             return [self._fallback_estimate(origin, dest, profile) for dest in destinations]
-
         except httpx.HTTPStatusError as e:
-            print(f"[OSRM HTTP ERROR] Status: {e.response.status_code}, Response: {e.response.text}")
             if e.response.status_code >= 500:
+                # OSRM server error, use fallback for all
                 return [self._fallback_estimate(origin, dest, profile) for dest in destinations]
             raise HTTPException(
                 status_code=503,
                 detail=f"OSRM service error: {e.response.text}"
             )
-
-        except HTTPException as e:
-            print(f"[OSRM HTTPException] {e.detail}")
+        except HTTPException:
             raise
-
         except Exception as e:
-            print(f"[OSRM UNKNOWN ERROR] {repr(e)}")
+            # Any other error, use fallback for all
             return [self._fallback_estimate(origin, dest, profile) for dest in destinations]
-
+    
 
     async def get_route_with_waypoints(
         self, 
