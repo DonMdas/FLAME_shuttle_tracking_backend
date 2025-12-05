@@ -29,19 +29,39 @@ for table in tables:
     print(f"  - {table}")
 print()
 
-# Display structure of each table
+# Display structure + data of each table
 for table in tables:
-    print(f"📌 Table: {table}")
+    print(f"\n📌 Table: {table}")
+
+    # --- Table structure ---
     cursor.execute(f"PRAGMA table_info({table})")
     columns = cursor.fetchall()
-    
+
     if not columns:
-        print("  ❗ No column info found (possible internal table).\n")
+        print("  ❗ No column info found (possible internal table).")
         continue
 
+    print("  📎 Columns:")
+    col_names = []
     for col in columns:
         cid, name, dtype, notnull, default, pk = col
-        print(f"  {name:20} {dtype:15} {'NOT NULL' if notnull else ''}")
-    print()
+        col_names.append(name)
+        print(f"    - {name:20} {dtype:15} {'NOT NULL' if notnull else ''}")
+
+    # --- Table rows ---
+    print("\n  📄 Rows:")
+    cursor.execute(f"SELECT * FROM {table}")
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("    (empty table)")
+    else:
+        # print header
+        print("    | " + " | ".join(col_names) + " |")
+        print("    " + "-" * (len(" | ".join(col_names)) + 4))
+
+        # print each row
+        for r in rows:
+            print("    | " + " | ".join(str(x) for x in r) + " |")
 
 conn.close()

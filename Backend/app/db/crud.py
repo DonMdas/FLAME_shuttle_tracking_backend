@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from .models import Vehicle, Admin, Schedule
@@ -290,23 +290,23 @@ def update_vehicle_location(
 # ============ Schedule CRUD Operations ============
 
 def get_schedule(db: Session, schedule_id: int) -> Optional[Schedule]:
-    """Get a single schedule by ID"""
-    return db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    """Get a single schedule by ID with vehicle details"""
+    return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.id == schedule_id).first()
 
 
 def get_schedules(db: Session, skip: int = 0, limit: int = 100) -> List[Schedule]:
-    """Get all schedules (admin view)"""
-    return db.query(Schedule).offset(skip).limit(limit).all()
+    """Get all schedules with vehicle details (admin view)"""
+    return db.query(Schedule).options(joinedload(Schedule.vehicle)).offset(skip).limit(limit).all()
 
 
 def get_schedules_by_vehicle(db: Session, vehicle_id: int) -> List[Schedule]:
-    """Get all schedules for a specific vehicle"""
-    return db.query(Schedule).filter(Schedule.vehicle_id == vehicle_id).all()
+    """Get all schedules for a specific vehicle with vehicle details"""
+    return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.vehicle_id == vehicle_id).all()
 
 
 def get_active_schedules(db: Session) -> List[Schedule]:
-    """Get all active schedules (client view)"""
-    return db.query(Schedule).filter(Schedule.is_active == True).all()
+    """Get all active schedules with vehicle details (client view)"""
+    return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.is_active == True).all()
 
 
 def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:

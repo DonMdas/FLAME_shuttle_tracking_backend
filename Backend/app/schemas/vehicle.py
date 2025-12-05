@@ -144,6 +144,19 @@ class ScheduleWithVehicle(ScheduleResponse):
         from_attributes = True
 
 
+class ScheduleWithVehicleAdmin(ScheduleResponse):
+    """Schedule response with full vehicle details (for admin view)"""
+    vehicle: VehicleAdmin
+    
+    class Config:
+        from_attributes = True
+
+
+# Rebuild models to resolve forward references
+ScheduleWithVehicleAdmin.model_rebuild()
+ScheduleWithVehicle.model_rebuild()
+
+
 # ============ GPS Location Data ============
 
 class DeviceAttributes(BaseModel):

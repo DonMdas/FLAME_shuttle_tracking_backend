@@ -29,7 +29,8 @@ from app.schemas.vehicle import (
     VehicleSyncResponse,
     ScheduleCreate,
     ScheduleUpdate,
-    ScheduleResponse
+    ScheduleResponse,
+    ScheduleWithVehicleAdmin
 )
 from app.api.admin import controllers_admin
 from app.db import crud
@@ -82,18 +83,23 @@ async def admin_login(credentials: AdminLogin, response: Response, db: Session =
             key="access_token",
             value=access_token,
             httponly=True,  # Cannot be accessed by JavaScript
-            secure=not settings.DEBUG,  # HTTPS only in production
+            secure=False,  # Allow on HTTP for local development (set to True in production)
             samesite="lax",  # CSRF protection
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # in seconds
-            path="/"
+            path="/",
+            domain=None  # Allow any domain in development
         )
         
         log_success("/admin/login", f"User '{user['username']}' logged in as {user['role']}", user["username"])
         
-        # Return CSRF token to be stored by client and sent in X-CSRF-Token header
+        logger.info(f"🍪 Cookie set: access_token (httponly=True, secure=False, samesite=lax, max_age={settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60})")
+        
+        # Return CSRF token AND access token (for clients that can't use cookies)
         return {
             "message": "Login successful",
             "csrf_token": csrf_token,
+            "access_token": access_token,  # Return token for Bearer auth fallback
+            "token_type": "bearer",
             "username": user["username"],
             "role": user["role"]
         }
@@ -341,7 +347,7 @@ async def delete_vehicle(
 
 # ============ Schedule Management ============
 
-@router.get("/schedules", response_model=List[ScheduleResponse])
+@router.get("/schedules", response_model=List[ScheduleWithVehicleAdmin])
 async def get_all_schedules(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
@@ -351,7 +357,7 @@ async def get_all_schedules(
     return schedules
 
 
-@router.get("/schedules/{schedule_id}", response_model=ScheduleResponse)
+@router.get("/schedules/{schedule_id}", response_model=ScheduleWithVehicleAdmin)
 async def get_schedule(
     schedule_id: int,
     db: Session = Depends(get_db),
@@ -367,7 +373,7 @@ async def get_schedule(
     return schedule
 
 
-@router.get("/vehicles/{vehicle_id}/schedules", response_model=List[ScheduleResponse])
+@router.get("/vehicles/{vehicle_id}/schedules", response_model=List[ScheduleWithVehicleAdmin])
 async def get_vehicle_schedules(
     vehicle_id: int,
     db: Session = Depends(get_db),
