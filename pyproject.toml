@@ -1,0 +1,19 @@
+[project]
+name = "shuttle-tracker-client"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography>=46.0.3",
+    "fastapi==0.104.1",
+    "httpx==0.25.1",
+    "pydantic[email]==2.5.0",
+    "pydantic-settings>=2.2.1",
+    "pymysql>=1.1.2",
+    "python-jose>=3.5.0",
+    "python-multipart==0.0.6",
+    "sqlalchemy>=2.0.44",
+    "uvicorn[standard]==0.24.0",
+    "bcrypt>=5.0.0",
+]

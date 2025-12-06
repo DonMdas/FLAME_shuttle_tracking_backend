@@ -116,7 +116,11 @@ class ETAService:
         
         # 7. Calculate segment progress if vehicle is on route using OSRM distances
         current_segment = None
-        if not is_off_route_flag and not is_stale and upcoming_stops_list and stops_with_eta:
+        
+        logger.info(f"Segment Progress Check - off_route={is_off_route_flag}, stale={is_stale}, upcoming_stops_count={len(upcoming_stops_list) if upcoming_stops_list else 0}, eta_stops_count={len(stops_with_eta) if stops_with_eta else 0}")
+        
+        # Calculate segment progress even if data is stale - position calculation is still valid
+        if not is_off_route_flag and upcoming_stops_list and stops_with_eta:
             # Find current segment based on full route
             current_segment_idx = self._find_current_segment(current_location, route_stops)
             
@@ -426,22 +430,22 @@ class ETAService:
                 profile=mode  # Changed from mode= to profile=
             )
             
-            if result and result.get("distance", 0) > 0:
-                distance = float(result["distance"])
+            if result and result.get("distance_meters", 0) > 0:
+                distance = float(result["distance_meters"])
                 # Cache the result
                 self._segment_distance_cache[route_id][segment_key] = distance
+                logger.info(f"Cached OSRM segment distance: {segment_key} = {distance}m")
                 return distance
         except Exception as e:
-            print(f"OSRM failed for segment {segment_key}: {e}")
+            logger.warning(f"OSRM failed for segment {segment_key}: {e}")
         
-        # Fallback to haversine
+        # Fallback to haversine (don't cache fallback - retry OSRM next time)
         fallback_distance = haversine_distance(
             from_station.lat, from_station.lon,
             to_station.lat, to_station.lon
         )
         
-        # Cache fallback value too (to avoid repeated failures)
-        self._segment_distance_cache[route_id][segment_key] = fallback_distance
+        logger.info(f"Using haversine fallback for {segment_key}: {fallback_distance}m (not cached)")
         return fallback_distance
 
     def _build_error_response(self, route_id, direction, is_stale, error_msg):

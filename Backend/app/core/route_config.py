@@ -25,13 +25,13 @@ class Station:
 STATIONS = {
     "campus": Station(
         id="campus",
-        name="Campus",
+        name="FLAME Campus",
         lat=18.525778,
         lon=73.733243
     ),
     "bavdhan-guard-post": Station(
         id="bavdhan-guard-post",
-        name="Bavdhan Guard post",
+        name="Bavdhan Check Post",
         lat=18.518468,
         lon=73.765785
     ),
@@ -43,9 +43,15 @@ STATIONS = {
     ),
     "vanaz-station": Station(
         id="vanaz-station",
-        name="Vanaz Station",
+        name="Vanaz Metro Station",
         lat=18.507034,
         lon=73.805283
+    ),
+    "anand-nagar-station": Station(
+        id="anand-nagar-station",
+        name="Anand Nagar Metro Station",
+        lat=18.509569,
+        lon=73.813995
     )
 }
 
@@ -60,7 +66,7 @@ ROUTE_DEFINITIONS = {
         "name": "Campus → FC Road",
         "from_location": "Campus",
         "to_location": "FC Road",
-        "stops": ["campus", "bavdhan-guard-post", "vanaz-station", "fc-road"]
+        "stops": ["campus", "bavdhan-guard-post", "vanaz-station","anand-nagar-station", "fc-road"]
     },
     
     # FC Road to Campus (reverse route)
@@ -69,7 +75,7 @@ ROUTE_DEFINITIONS = {
         "name": "FC Road → Campus",
         "from_location": "FC Road",
         "to_location": "Campus",
-        "stops": ["fc-road", "vanaz-station", "bavdhan-guard-post", "campus"]
+        "stops": ["fc-road","anand-nagar-station", "vanaz-station", "bavdhan-guard-post", "campus"]
     },
     
     # Campus to Bavdhan Guard Post (direct, no intermediate stops)
