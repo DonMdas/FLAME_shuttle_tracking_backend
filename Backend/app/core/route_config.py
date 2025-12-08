@@ -38,8 +38,8 @@ STATIONS = {
     "fc-road": Station(
         id="fc-road",
         name="FC Road",
-        lat=18.522335,
-        lon=73.843739
+        lat=18.522552,
+        lon=73.848186
     ),
     "vanaz-station": Station(
         id="vanaz-station",
@@ -52,6 +52,12 @@ STATIONS = {
         name="Anand Nagar Metro Station",
         lat=18.509569,
         lon=73.813995
+    ),
+    "ideal-colony-station": Station(
+        id="ideal-colony-station",
+        name="Ideal Colony Metro Station",
+        lat=18.509011,
+        lon=73.822008
     )
 }
 

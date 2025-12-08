@@ -4,6 +4,7 @@ from typing import List
 
 from db.session import get_db
 from schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, ScheduleWithVehicle
+from schemas.route import RouteStopsResponse
 from api.client import controllers_client
 
 router = APIRouter(prefix="/client", tags=["Client"])
@@ -63,3 +64,13 @@ async def get_all_locations(db: Session = Depends(get_db)):
     Public endpoint - no authentication required.
     """
     return await controllers_client.get_all_vehicles_locations(db)
+
+
+@router.get("/routes/{route_id}/stops", response_model=RouteStopsResponse)
+async def get_route_stops(route_id: str):
+    """
+    Get all station information for a specific route.
+    Returns ordered list of stops with names and coordinates.
+    Public endpoint - no authentication required.
+    """
+    return await controllers_client.get_route_stops_info(route_id)

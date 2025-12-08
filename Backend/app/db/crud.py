@@ -3,6 +3,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from .models import Vehicle, Admin, Schedule
 from schemas.vehicle import VehicleCreate, VehicleUpdate, ScheduleCreate, ScheduleUpdate
+from app.core.route_config import ROUTE_DEFINITIONS, STATIONS, haversine_distance
+from app.core.config import settings
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -147,6 +149,15 @@ def sync_vehicle_from_api(db: Session, api_data: Dict[str, Any]) -> Dict[str, An
         db.commit()
         db.refresh(existing)
         
+        # Check if vehicle reached destination and auto-deactivate schedule (only if schedule is active)
+        if existing.last_latitude and existing.last_longitude:
+            check_and_deactivate_schedule(
+                db,
+                existing.vehicle_id,
+                existing.last_latitude,
+                existing.last_longitude
+            )
+        
         return {"vehicle": existing, "created": False, "updated": True}
     else:
         # Create new vehicle
@@ -217,6 +228,16 @@ def update_vehicle_from_live_data(
     
     db.commit()
     db.refresh(db_vehicle)
+    
+    # Check if vehicle reached destination and auto-deactivate schedule
+    if db_vehicle.last_latitude and db_vehicle.last_longitude:
+        check_and_deactivate_schedule(
+            db,
+            vehicle_id,
+            db_vehicle.last_latitude,
+            db_vehicle.last_longitude
+        )
+    
     return db_vehicle
 
 
@@ -373,3 +394,69 @@ def delete_schedule(db: Session, schedule_id: int) -> bool:
     db.delete(db_schedule)
     db.commit()
     return True
+
+
+def check_and_deactivate_schedule(
+    db: Session,
+    vehicle_id: int,
+    current_lat: float,
+    current_lon: float,
+    distance_threshold_meters: Optional[float] = None
+) -> Optional[Schedule]:
+    """
+    Check if vehicle has reached its destination and deactivate the schedule if so.
+    
+    Args:
+        db: Database session
+        vehicle_id: Vehicle ID
+        current_lat: Current latitude
+        current_lon: Current longitude
+        distance_threshold_meters: Distance threshold to consider reached (uses DESTINATION_PROXIMITY_THRESHOLD from env if not provided)
+        
+    Returns:
+        Deactivated schedule if any, None otherwise
+    """
+    # Use env config if not provided
+    if distance_threshold_meters is None:
+        distance_threshold_meters = settings.DESTINATION_PROXIMITY_THRESHOLD
+    # Get active schedule for this vehicle
+    active_schedule = db.query(Schedule).filter(
+        Schedule.vehicle_id == vehicle_id,
+        Schedule.is_active == True
+    ).first()
+    
+    if not active_schedule:
+        return None
+    
+    # Get route definition
+    route_def = ROUTE_DEFINITIONS.get(active_schedule.route_id)
+    if not route_def:
+        return None
+    
+    # Get final destination (last stop in route)
+    stop_ids = route_def["stops"]
+    if not stop_ids:
+        return None
+    
+    final_stop_id = stop_ids[-1]
+    final_station = STATIONS.get(final_stop_id)
+    
+    if not final_station:
+        return None
+    
+    # Calculate distance to destination
+    distance = haversine_distance(
+        current_lat,
+        current_lon,
+        final_station.lat,
+        final_station.lon
+    )
+    
+    # If within threshold, deactivate schedule
+    if distance <= distance_threshold_meters:
+        active_schedule.is_active = False
+        db.commit()
+        db.refresh(active_schedule)
+        return active_schedule
+    
+    return None

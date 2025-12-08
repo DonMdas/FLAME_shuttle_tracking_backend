@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # GPS Configuration
     GPS_DATA_STALE_THRESHOLD: int   # Seconds - data older than this is considered stale
     VEHICLE_SYNC_INTERVAL: int   # Seconds - sync vehicle list every 5 minutes
+    DESTINATION_PROXIMITY_THRESHOLD: int  # Meters - distance threshold to auto-deactivate schedule
     
     # CORS
     CORS_ORIGINS: str

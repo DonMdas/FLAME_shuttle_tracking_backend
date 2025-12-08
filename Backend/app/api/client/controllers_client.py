@@ -3,7 +3,9 @@ from typing import List
 from fastapi import HTTPException
 from db import crud
 from schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, ScheduleWithVehicle
+from schemas.route import RouteStopsResponse, StationInfo
 from services.gps import gps_service
+from app.core.route_config import ROUTE_DEFINITIONS, STATIONS
 
 
 async def get_active_schedules_with_vehicles(db: Session) -> List[ScheduleWithVehicle]:
@@ -136,3 +138,34 @@ async def get_all_vehicles_locations(db: Session) -> List[VehicleLocation]:
             continue
     
     return locations
+
+
+async def get_route_stops_info(route_id: str) -> RouteStopsResponse:
+    """
+    Get all station information for a given route.
+    Returns station names and coordinates in order.
+    """
+    # Check if route exists
+    route_def = ROUTE_DEFINITIONS.get(route_id)
+    if not route_def:
+        raise HTTPException(status_code=404, detail=f"Route '{route_id}' not found")
+    
+    # Get station details for all stops in route
+    stops_info = []
+    for stop_id in route_def["stops"]:
+        station = STATIONS.get(stop_id)
+        if station:
+            stops_info.append(StationInfo(
+                id=station.id,
+                name=station.name,
+                lat=station.lat,
+                lon=station.lon
+            ))
+    
+    return RouteStopsResponse(
+        route_id=route_def["route_id"],
+        route_name=route_def["name"],
+        from_location=route_def["from_location"],
+        to_location=route_def["to_location"],
+        stops=stops_info
+    )
