@@ -349,11 +349,11 @@ async def delete_vehicle(
 
 @router.get("/schedules", response_model=List[ScheduleWithVehicleAdmin])
 async def get_all_schedules(
-    schedule_type: str = "regular",
+    schedule_type: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get all schedules. Defaults to regular schedules. Pass schedule_type=staff for staff schedules. Admin only."""
+    """Get all schedules. Pass schedule_type=staff or schedule_type=regular to filter. Admin only."""
     schedules = crud.get_schedules(db, schedule_type=schedule_type)
     return schedules
 
