@@ -110,6 +110,7 @@ class ScheduleBase(BaseModel):
     vehicle_id: int
     start_time: datetime
     route_id: str  # Must match a route_id from ROUTE_DEFINITIONS in route_config.py
+    schedule_type: str = "regular"  # Type: "regular", "staff", etc.
     is_active: bool = True
 
 
@@ -123,6 +124,7 @@ class ScheduleUpdate(BaseModel):
     vehicle_id: Optional[int] = None
     start_time: Optional[datetime] = None
     route_id: Optional[str] = None  # Must match a route_id from ROUTE_DEFINITIONS
+    schedule_type: Optional[str] = None  # Type: "regular", "staff", etc.
     is_active: Optional[bool] = None
 
 

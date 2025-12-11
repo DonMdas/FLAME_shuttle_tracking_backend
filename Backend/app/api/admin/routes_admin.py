@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import timedelta
 
 from app.db.session import get_db
@@ -349,11 +349,12 @@ async def delete_vehicle(
 
 @router.get("/schedules", response_model=List[ScheduleWithVehicleAdmin])
 async def get_all_schedules(
+    schedule_type: str = "regular",
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get all schedules. Admin only."""
-    schedules = crud.get_schedules(db)
+    """Get all schedules. Defaults to regular schedules. Pass schedule_type=staff for staff schedules. Admin only."""
+    schedules = crud.get_schedules(db, schedule_type=schedule_type)
     return schedules
 
 
@@ -376,10 +377,11 @@ async def get_schedule(
 @router.get("/vehicles/{vehicle_id}/schedules", response_model=List[ScheduleWithVehicleAdmin])
 async def get_vehicle_schedules(
     vehicle_id: int,
+    schedule_type: str = "regular",
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get all schedules for a specific vehicle. Admin only."""
+    """Get all schedules for a specific vehicle. Defaults to regular schedules. Pass schedule_type=staff for staff schedules. Admin only."""
     # Verify vehicle exists
     vehicle = crud.get_vehicle(db, vehicle_id)
     if not vehicle:
@@ -387,7 +389,7 @@ async def get_vehicle_schedules(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vehicle not found"
         )
-    return crud.get_schedules_by_vehicle(db, vehicle_id)
+    return crud.get_schedules_by_vehicle(db, vehicle_id, schedule_type=schedule_type)
 
 
 @router.post("/schedules", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)

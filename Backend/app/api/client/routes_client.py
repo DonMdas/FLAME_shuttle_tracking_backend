@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from db.session import get_db
 from schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, ScheduleWithVehicle
@@ -13,23 +13,32 @@ router = APIRouter(prefix="/client", tags=["Client"])
 # ============ Public Endpoints (No Authentication Required) ============
 
 @router.get("/schedules", response_model=List[ScheduleWithVehicle])
-async def get_active_schedules(db: Session = Depends(get_db)):
+async def get_active_schedules(
+    schedule_type: str = "regular",
+    db: Session = Depends(get_db)
+):
     """
     Get all active schedules with vehicle details.
-    Only shows schedules that are marked as active.
+    Defaults to regular schedules for backward compatibility.
+    Pass schedule_type=staff for staff schedules.
     Public endpoint - no authentication required.
     """
-    return await controllers_client.get_active_schedules_with_vehicles(db)
+    return await controllers_client.get_active_schedules_with_vehicles(db, schedule_type)
 
 
 @router.get("/vehicles", response_model=List[VehiclePublic])
-async def get_vehicles_list(db: Session = Depends(get_db)):
+async def get_vehicles_list(
+    schedule_type: str = "regular",
+    db: Session = Depends(get_db)
+):
     """
     Get list of vehicles that have active schedules.
+    Defaults to regular schedules for backward compatibility.
+    Pass schedule_type=staff for staff schedules.
     Public endpoint - no authentication required.
     Returns only basic info, no sensitive data.
     """
-    return await controllers_client.get_available_vehicles(db)
+    return await controllers_client.get_available_vehicles(db, schedule_type)
 
 
 @router.get("/vehicles/{vehicle_id}/location", response_model=VehicleLocation)

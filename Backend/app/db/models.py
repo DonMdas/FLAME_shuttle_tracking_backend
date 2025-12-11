@@ -83,6 +83,7 @@ class Schedule(Base):
     # Schedule details
     start_time = Column(DateTime(timezone=True), nullable=False)
     route_id = Column(String(100), nullable=False, index=True)  # References ROUTE_DEFINITIONS in route_config.py
+    schedule_type = Column(String(50), default="regular", nullable=False, index=True)  # Type: "regular", "staff", etc.
     
     # Status
     is_active = Column(Boolean, default=True, nullable=False)

@@ -8,23 +8,30 @@ from services.gps import gps_service
 from app.core.route_config import ROUTE_DEFINITIONS, STATIONS
 
 
-async def get_active_schedules_with_vehicles(db: Session) -> List[ScheduleWithVehicle]:
+async def get_active_schedules_with_vehicles(db: Session, schedule_type: str = "regular") -> List[ScheduleWithVehicle]:
     """
     Get all active schedules with their vehicle details.
     Only returns schedules marked as active.
+    Defaults to regular schedules. Pass schedule_type="staff" for staff schedules.
     """
-    schedules = crud.get_active_schedules(db)
+    schedules = crud.get_active_schedules(db, schedule_type=schedule_type)
     return schedules
 
 
-async def get_available_vehicles(db: Session) -> List[VehiclePublic]:
+async def get_available_vehicles(db: Session, schedule_type: str = "regular") -> List[VehiclePublic]:
     """
     Get list of vehicles that have active schedules.
     Only returns vehicles that are active and have active schedules.
+    Defaults to regular schedules. Pass schedule_type="staff" for staff schedules.
     No sensitive data (tokens) included.
     """
-    vehicles = crud.get_vehicles_with_active_schedules(db)
-    return vehicles
+    # Get active schedules (filtered by type)
+    active_schedules = crud.get_active_schedules(db, schedule_type=schedule_type)
+    # Get unique vehicle IDs from active schedules
+    vehicle_ids = {s.vehicle_id for s in active_schedules}
+    # Return vehicles that have these schedules
+    vehicles = [crud.get_vehicle(db, vid) for vid in vehicle_ids]
+    return [v for v in vehicles if v and v.is_active]
 
 
 async def get_vehicle_live_location(db: Session, vehicle_id: int) -> VehicleLocation:

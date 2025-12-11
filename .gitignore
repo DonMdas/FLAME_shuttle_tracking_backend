@@ -15,4 +15,6 @@ wheels/
 
 *.copilot_files/
 
+*.db*
+
 

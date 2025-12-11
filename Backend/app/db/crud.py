@@ -315,19 +315,28 @@ def get_schedule(db: Session, schedule_id: int) -> Optional[Schedule]:
     return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.id == schedule_id).first()
 
 
-def get_schedules(db: Session, skip: int = 0, limit: int = 100) -> List[Schedule]:
+def get_schedules(db: Session, skip: int = 0, limit: int = 100, schedule_type: Optional[str] = None) -> List[Schedule]:
     """Get all schedules with vehicle details (admin view)"""
-    return db.query(Schedule).options(joinedload(Schedule.vehicle)).offset(skip).limit(limit).all()
+    query = db.query(Schedule).options(joinedload(Schedule.vehicle))
+    if schedule_type:
+        query = query.filter(Schedule.schedule_type == schedule_type)
+    return query.offset(skip).limit(limit).all()
 
 
-def get_schedules_by_vehicle(db: Session, vehicle_id: int) -> List[Schedule]:
+def get_schedules_by_vehicle(db: Session, vehicle_id: int, schedule_type: Optional[str] = None) -> List[Schedule]:
     """Get all schedules for a specific vehicle with vehicle details"""
-    return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.vehicle_id == vehicle_id).all()
+    query = db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.vehicle_id == vehicle_id)
+    if schedule_type:
+        query = query.filter(Schedule.schedule_type == schedule_type)
+    return query.all()
 
 
-def get_active_schedules(db: Session) -> List[Schedule]:
+def get_active_schedules(db: Session, schedule_type: Optional[str] = None) -> List[Schedule]:
     """Get all active schedules with vehicle details (client view)"""
-    return db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.is_active == True).all()
+    query = db.query(Schedule).options(joinedload(Schedule.vehicle)).filter(Schedule.is_active == True)
+    if schedule_type:
+        query = query.filter(Schedule.schedule_type == schedule_type)
+    return query.all()
 
 
 def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
@@ -348,6 +357,7 @@ def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
         vehicle_id=schedule.vehicle_id,
         start_time=schedule.start_time,
         route_id=schedule.route_id,
+        schedule_type=schedule.schedule_type,
         is_active=schedule.is_active
     )
     db.add(db_schedule)
