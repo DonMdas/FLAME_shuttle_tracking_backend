@@ -268,3 +268,135 @@ def authenticate_admin(username: str, password: str) -> Optional[dict]:
     if username == settings.ADMIN_USERNAME and password == settings.ADMIN_PASSWORD:
         return {"username": username, "role": "super_admin"}
     return None
+
+
+# ============ User Authentication Dependencies ============
+
+async def get_current_user_optional(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Optional[dict]:
+    """
+    Optional authentication - returns user info if authenticated, None otherwise.
+    Use for endpoints that work both authenticated and unauthenticated.
+    Does NOT enforce CSRF for flexibility.
+    """
+    token = None
+    
+    # Try cookie first
+    if access_token:
+        token = access_token
+    # Fallback to bearer token
+    elif credentials:
+        token = credentials.credentials
+    
+    if not token:
+        return None
+    
+    try:
+        payload = verify_token(token)
+        user_id = payload.get("user_id")
+        email = payload.get("sub")
+        role = payload.get("role")
+        user_type = payload.get("user_type", "admin")  # Default to admin for backward compatibility
+        
+        if not email:
+            return None
+        
+        return {
+            "email": email,
+            "user_id": user_id,
+            "role": role,
+            "user_type": user_type,
+            "csrf_token": payload.get("csrf")
+        }
+    except:
+        return None
+
+
+async def get_authenticated_user(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> dict:
+    """
+    Dependency to get the current authenticated user (regular user, not admin).
+    Enforces authentication and CSRF validation.
+    Returns user info with email, user_id, and role.
+    Use this for user-only endpoints.
+    """
+    token = None
+    
+    # Try cookie first (preferred method)
+    if access_token:
+        token = access_token
+        logger.debug(f"User authentication via cookie for {request.method} {request.url.path}")
+    # Fallback to bearer token
+    elif credentials:
+        token = credentials.credentials
+        logger.debug(f"User authentication via Bearer token for {request.method} {request.url.path}")
+    
+    if not token:
+        logger.warning(f"No authentication credentials provided for {request.method} {request.url.path}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please login to access this resource.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    payload = verify_token(token)
+    
+    # Verify CSRF token for cookie-based auth on state-changing operations
+    if access_token and request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+        jwt_csrf = payload.get("csrf")
+        header_csrf = request.headers.get("X-CSRF-Token") or request.headers.get("x-csrf-token")
+        
+        # Only enforce CSRF if JWT has a csrf token
+        if jwt_csrf:
+            # Skip CSRF validation in DEBUG mode
+            if settings.DEBUG:
+                if not header_csrf:
+                    logger.debug(f"CSRF check skipped (DEBUG mode) for {request.method} {request.url.path}")
+            else:
+                # Production: enforce CSRF
+                if not header_csrf:
+                    logger.warning(f"CSRF token missing for {request.method} {request.url.path}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="CSRF token is required. Please include X-CSRF-Token header."
+                    )
+                if jwt_csrf != header_csrf:
+                    logger.warning(f"CSRF token mismatch for user {payload.get('sub')} - {request.method} {request.url.path}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="CSRF token is invalid or has expired. Please logout and login again."
+                    )
+    
+    email: str = payload.get("sub")
+    user_id: int = payload.get("user_id")
+    role: str = payload.get("role")
+    user_type: str = payload.get("user_type", "admin")
+    
+    if not email or not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Ensure it's a regular user, not an admin
+    if user_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is for regular users only. Admins cannot access this."
+        )
+    
+    return {
+        "email": email,
+        "user_id": user_id,
+        "role": role,
+        "user_type": user_type,
+        "csrf_token": payload.get("csrf")
+    }
+

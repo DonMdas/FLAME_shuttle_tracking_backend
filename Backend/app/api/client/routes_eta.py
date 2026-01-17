@@ -7,28 +7,32 @@ Public endpoints for getting ETAs to upcoming shuttle stops.
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from db.session import get_db
-from schemas.eta import (
+from app.db.session import get_db
+from app.schemas.eta import (
     ETAUpcomingResponse,
     ETAByCoordinatesRequest,
     ETAByCoordinatesResponse
 )
-from api.client import controllers_eta
+from app.api.client import controllers_eta
+from app.core.security import get_authenticated_user
 
 router = APIRouter(prefix="/eta", tags=["ETA"])
 
 
-# ============ Public ETA Endpoints ============
+# ============ Authenticated ETA Endpoints ============
 
 @router.get("/upcoming", response_model=ETAUpcomingResponse)
 async def get_upcoming_stops_eta(
     vehicle_id: int = Query(..., description="Vehicle ID"),
     mode: str = Query("driving", description="Travel mode (driving or walking)"),
     max_stops: int = Query(2, ge=1, le=10, description="Maximum number of upcoming stops to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_authenticated_user)
 ):
     """
     Get ETA to upcoming stops for a specific vehicle.
+    
+    Authentication: Required
     
     This endpoint returns the estimated time of arrival (ETA) from the vehicle's
     current location to the next N upcoming stops on its scheduled route.
@@ -64,10 +68,13 @@ async def get_upcoming_stops_eta(
 
 @router.post("/by-coordinates", response_model=ETAByCoordinatesResponse)
 async def get_eta_by_coordinates(
-    request: ETAByCoordinatesRequest
+    request: ETAByCoordinatesRequest,
+    current_user: dict = Depends(get_authenticated_user)
 ):
     """
     Calculate ETA from origin to arbitrary target coordinates.
+    
+    Authentication: Required
     
     This endpoint computes ETAs from a given origin point to one or more
     target locations. Useful for debugging or when coordinates are already known.

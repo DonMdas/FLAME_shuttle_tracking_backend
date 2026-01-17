@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -36,8 +36,16 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str
     
-    #OSRM_BASE_URL
-    OSRM_BASE_URL : str
+    # OSRM
+    OSRM_BASE_URL: str
+    
+    # Email/SMTP Configuration (Optional - for OTP emails)
+    SMTP_SERVER: Optional[str] = None
+    SMTP_PORT: Optional[int] = None
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    FROM_EMAIL: Optional[str] = None
+    FROM_NAME: Optional[str] = None
     
     @property
     def cors_origins_list(self) -> List[str]:

@@ -3,6 +3,7 @@ from typing import List
 from fastapi import HTTPException
 from db import crud
 from schemas.vehicle import VehicleUpdate, VehicleAdmin, VehicleSyncResponse
+from schemas.user import UserResponse, UserUpdate
 from services.gps import gps_service
 from services.vehicle_sync import vehicle_sync_service
 
@@ -132,4 +133,68 @@ async def toggle_vehicle_visibility(db: Session, vehicle_id: int, visible: bool)
         status_code=410,
         detail="is_visible field is deprecated. Use is_active instead."
     )
+
+
+# ============ User Management (Admin Only) ============
+
+async def list_all_users(db: Session, role: str = None, skip: int = 0, limit: int = 1000) -> List[UserResponse]:
+    """
+    Get all users with optional role filter.
+    Admin endpoint to view all registered users.
+    """
+    users = crud.get_users(db, skip=skip, limit=limit, role=role)
+    return [UserResponse.from_orm(user) for user in users]
+
+
+async def get_user_details(db: Session, user_id: int) -> UserResponse:
+    """Get a specific user by ID"""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse.from_orm(user)
+
+
+async def update_user_role_by_admin(db: Session, user_id: int, role_data: UserUpdate) -> UserResponse:
+    """
+    Update user's role (admin only).
+    Users cannot change their own roles.
+    """
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update role
+    updated_user = crud.update_user_role(db, user_id, role_data.role)
+    if not updated_user:
+        raise HTTPException(status_code=500, detail="Failed to update user role")
+    
+    return UserResponse.from_orm(updated_user)
+
+
+async def toggle_user_active(db: Session, user_id: int, active: bool) -> UserResponse:
+    """Toggle user active status (admin control)"""
+    user = crud.update_user_status(db, user_id, active)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse.from_orm(user)
+
+
+async def delete_user_by_admin(db: Session, user_id: int) -> dict:
+    """
+    Delete a user from the system (admin only).
+    Warning: This permanently deletes the user and cannot be undone.
+    Consider using toggle_user_active to deactivate instead.
+    """
+    # Check if user exists first
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Delete the user
+    success = crud.delete_user(db, user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete user")
+    
+    return {"message": f"User {user.email} deleted successfully"}
+
 

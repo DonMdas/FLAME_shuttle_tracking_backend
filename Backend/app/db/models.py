@@ -97,3 +97,35 @@ class Schedule(Base):
     
     def __repr__(self):
         return f"<Schedule {self.route_id} @ {self.start_time} (Vehicle {self.vehicle_id})>"
+
+
+class User(Base):
+    """
+    User model - stores student and staff user accounts.
+    Users sign up with email (@flame.edu.in), password, and role.
+    Email must be verified via OTP before account is active.
+    """
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    email = Column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=True)  # Nullable for Google OAuth users
+    role = Column(String(20), nullable=False, index=True)  # "student" or "staff"
+    
+    # Email verification
+    is_verified = Column(Boolean, default=False, nullable=False)
+    otp = Column(String(6), nullable=True)  # Current OTP for verification
+    otp_created_at = Column(DateTime(timezone=True), nullable=True)  # OTP expiry tracking
+    
+    # OAuth
+    google_id = Column(String(100), unique=True, nullable=True, index=True)  # Google OAuth ID
+    
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), default=get_ist_now)
+    updated_at = Column(DateTime(timezone=True), default=get_ist_now, onupdate=get_ist_now)
+    
+    def __repr__(self):
+        return f"<User {self.email} ({self.role})>"

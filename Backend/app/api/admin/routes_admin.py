@@ -32,6 +32,7 @@ from app.schemas.vehicle import (
     ScheduleResponse,
     ScheduleWithVehicleAdmin
 )
+from app.schemas.user import UserResponse, UserUpdate
 from app.api.admin import controllers_admin
 from app.db import crud
 
@@ -506,3 +507,141 @@ async def toggle_schedule_status(
             detail="Schedule not found"
         )
     return {"message": f"Schedule {'activated' if is_active else 'deactivated'} successfully"}
+
+
+# ============ User Management (Admin Only) ============
+
+@router.get("/users", response_model=List[UserResponse])
+async def list_users(
+    role: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all users with optional role filter.
+    Admin endpoint to view all registered users.
+    
+    Query Parameters:
+    - role: Filter by role (student/staff)
+    - skip: Number of records to skip (pagination)
+    - limit: Maximum number of records to return
+    """
+    try:
+        log_request("/admin/users", "GET", current_user.get("username"))
+        users = await controllers_admin.list_all_users(db, role=role, skip=skip, limit=limit)
+        log_success("/admin/users", f"Retrieved {len(users)} users", current_user.get("username"))
+        return users
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/users", e, current_user.get("username"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve users"
+        )
+
+
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get a specific user by ID. Admin only."""
+    try:
+        log_request("/admin/users/{user_id}", "GET", current_user.get("username"))
+        user = await controllers_admin.get_user_details(db, user_id)
+        log_success("/admin/users/{user_id}", f"Retrieved user: {user.email}", current_user.get("username"))
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/users/{user_id}", e, current_user.get("username"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve user"
+        )
+
+
+@router.put("/users/{user_id}/role", response_model=UserResponse)
+async def update_user_role(
+    user_id: int,
+    role_data: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update user's role.
+    Admin only - users cannot change their own roles.
+    
+    Body:
+    - role: New role (student/staff)
+    """
+    try:
+        log_request("/admin/users/{user_id}/role", "PUT", current_user.get("username"))
+        updated_user = await controllers_admin.update_user_role_by_admin(db, user_id, role_data)
+        log_success("/admin/users/{user_id}/role", f"Updated user role: {updated_user.email} -> {role_data.role}", current_user.get("username"))
+        return updated_user
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/users/{user_id}/role", e, current_user.get("username"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user role"
+        )
+
+
+@router.patch("/users/{user_id}/active")
+async def toggle_user_status(
+    user_id: int,
+    is_active: bool,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Activate or deactivate a user account. Admin only."""
+    try:
+        log_request("/admin/users/{user_id}/active", "PATCH", current_user.get("username"))
+        updated_user = await controllers_admin.toggle_user_active(db, user_id, is_active)
+        log_success("/admin/users/{user_id}/active", f"User {'activated' if is_active else 'deactivated'}: {updated_user.email}", current_user.get("username"))
+        return {"message": f"User {'activated' if is_active else 'deactivated'} successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/users/{user_id}/active", e, current_user.get("username"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user status"
+        )
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Delete a user permanently. Admin only.
+    
+    **Warning**: This action cannot be undone. Consider using PATCH /users/{user_id}/active
+    to deactivate the user instead.
+    
+    **Security**: Requires admin authentication.
+    """
+    try:
+        log_request("/admin/users/{user_id}", "DELETE", current_user.get("username"))
+        result = await controllers_admin.delete_user_by_admin(db, user_id)
+        log_success("/admin/users/{user_id}", f"User {user_id} deleted", current_user.get("username"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("/admin/users/{user_id}", e, current_user.get("username"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )
+

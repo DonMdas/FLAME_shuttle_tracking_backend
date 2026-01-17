@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
-from .models import Vehicle, Admin, Schedule
+from .models import Vehicle, Admin, Schedule, User
 from schemas.vehicle import VehicleCreate, VehicleUpdate, ScheduleCreate, ScheduleUpdate
 from app.core.route_config import ROUTE_DEFINITIONS, STATIONS, haversine_distance
 from app.core.config import settings
@@ -470,3 +470,107 @@ def check_and_deactivate_schedule(
         return active_schedule
     
     return None
+
+
+# ============ User CRUD Operations ============
+
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """Get user by email"""
+    return db.query(User).filter(User.email == email.lower()).first()
+
+
+def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]:
+    """Get user by Google OAuth ID"""
+    return db.query(User).filter(User.google_id == google_id).first()
+
+
+def get_user(db: Session, user_id: int) -> Optional[User]:
+    """Get user by ID"""
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def get_users(db: Session, skip: int = 0, limit: int = 1000, role: Optional[str] = None) -> List[User]:
+    """Get all users with optional role filter"""
+    query = db.query(User)
+    if role:
+        query = query.filter(User.role == role)
+    return query.offset(skip).limit(limit).all()
+
+
+def create_user(db: Session, email: str, hashed_password: Optional[str], role: str, google_id: Optional[str] = None) -> User:
+    """Create a new user"""
+    db_user = User(
+        email=email.lower(),
+        hashed_password=hashed_password,
+        role=role.lower(),
+        google_id=google_id,
+        is_verified=False,  # Will be verified via OTP
+        is_active=True
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def update_user_otp(db: Session, user_id: int, otp: str) -> Optional[User]:
+    """Update user's OTP for verification"""
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    db_user.otp = otp
+    db_user.otp_created_at = get_ist_now()
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def verify_user(db: Session, user_id: int) -> Optional[User]:
+    """Mark user as verified and clear OTP"""
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    db_user.is_verified = True
+    db_user.otp = None
+    db_user.otp_created_at = None
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def update_user_role(db: Session, user_id: int, role: str) -> Optional[User]:
+    """Update user's role (admin only)"""
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    db_user.role = role.lower()
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def update_user_status(db: Session, user_id: int, is_active: bool) -> Optional[User]:
+    """Activate or deactivate a user"""
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    db_user.is_active = is_active
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def delete_user(db: Session, user_id: int) -> bool:
+    """Delete a user"""
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return False
+    
+    db.delete(db_user)
+    db.commit()
+    return True
+
