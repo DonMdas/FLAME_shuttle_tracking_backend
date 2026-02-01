@@ -18,6 +18,7 @@ from app.schemas.user import (
     SetPassword,
     ChangePassword,
     ForgotPassword,
+    ResetPassword,
     TokenResponse,
     LinkingRequiredResponse,
     MessageResponse
@@ -292,6 +293,34 @@ async def forgot_password(
         raise
     except Exception as e:
         log_error("POST /auth/forgot-password", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
+        )
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    reset_data: ResetPassword,
+    db: Session = Depends(get_db)
+):
+    """
+    Reset password using OTP from email.
+    
+    Verifies the OTP and updates the password in one step.
+    After successful reset, user can login with the new password.
+    
+    OTP is valid for 10 minutes.
+    """
+    try:
+        log_request("/auth/reset-password", "POST")
+        result = await controllers_auth.reset_password(db, reset_data)
+        log_success("/auth/reset-password", f"Password reset: {reset_data.email}", user=reset_data.email)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/reset-password", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred. Please try again."

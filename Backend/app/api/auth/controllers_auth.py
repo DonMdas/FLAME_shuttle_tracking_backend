@@ -701,3 +701,73 @@ async def forgot_password(db: Session, forgot_data: ForgotPassword) -> Dict[str,
         logger.error(f"Failed to send password reset email to: {forgot_data.email}")
     
     return success_message
+
+
+async def reset_password(db: Session, reset_data) -> Dict[str, Any]:
+    """
+    Reset user password using OTP.
+    Verifies OTP and updates password in one step.
+    
+    Args:
+        db: Database session
+        reset_data: Email, OTP, and new password
+    
+    Returns:
+        Dict with success message
+    """
+    # Get user by email
+    user = crud.get_user_by_email(db, reset_data.email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user has a password (not Google-only)
+    if user.hashed_password is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account uses Google Sign-In only. Password reset not available."
+        )
+    
+    # Check if OTP exists
+    if not user.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No password reset request found. Please request a new one."
+        )
+    
+    # Verify OTP validity (10 minutes)
+    if not is_otp_valid(user.otp_created_at, validity_minutes=10):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset OTP has expired. Please request a new one."
+        )
+    
+    # Check if OTP matches
+    if user.otp != reset_data.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP. Please check and try again."
+        )
+    
+    # Hash new password
+    new_hashed_password = get_password_hash(reset_data.new_password)
+    
+    # Update password
+    updated_user = crud.update_user_password(db, user.id, new_hashed_password)
+    
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset password. Please try again."
+        )
+    
+    # Clear OTP after successful reset
+    crud.update_user_otp(db, user.id, None)
+    
+    logger.info(f"Password reset successful for user: {user.email}")
+    
+    return {
+        "message": "Password reset successful! You can now login with your new password."
+    }
