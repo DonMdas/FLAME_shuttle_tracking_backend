@@ -102,18 +102,27 @@ class Schedule(Base):
 class User(Base):
     """
     User model - stores student and staff user accounts.
-    Users sign up with email (@flame.edu.in), password, and role.
-    Email must be verified via OTP before account is active.
+    Supports multiple authentication methods: password, Google OAuth, or hybrid.
+    
+    Auth Provider States:
+    - 'password': Email + password authentication only
+    - 'google': Google OAuth only
+    - 'google+password': Both methods enabled (hybrid account)
+    
+    Role can be NULL only during Google onboarding process.
     """
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     email = Column(String(100), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=True)  # Nullable for Google OAuth users
-    role = Column(String(20), nullable=False, index=True)  # "student" or "staff"
+    hashed_password = Column(String(255), nullable=True)  # NULL for Google-only users
+    role = Column(String(20), nullable=True, index=True)  # "student" or "staff" - NULL during onboarding
+    
+    # Authentication provider tracking
+    auth_provider = Column(String(20), nullable=False, index=True)  # "password", "google", "google+password"
     
     # Email verification
-    is_verified = Column(Boolean, default=False, nullable=False)
+    is_email_verified = Column(Boolean, default=False, nullable=False)
     otp = Column(String(6), nullable=True)  # Current OTP for verification
     otp_created_at = Column(DateTime(timezone=True), nullable=True)  # OTP expiry tracking
     
@@ -128,4 +137,4 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), default=get_ist_now, onupdate=get_ist_now)
     
     def __repr__(self):
-        return f"<User {self.email} ({self.role})>"
+        return f"<User {self.email} ({self.role or 'pending'}) - {self.auth_provider}>"

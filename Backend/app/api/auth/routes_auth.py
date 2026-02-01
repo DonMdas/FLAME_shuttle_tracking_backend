@@ -1,16 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
+from typing import Union
 from pydantic import BaseModel, EmailStr
 
 from app.db.session import get_db
 from app.core.config import settings
+from app.core.security import get_current_user
 from app.core.logger import logger, log_request, log_success, log_error
 from app.schemas.user import (
     UserSignup,
     OTPVerify,
     UserLogin,
+    GoogleSignup,
     GoogleLogin,
+    LinkGoogle,
+    SetRole,
+    SetPassword,
+    ChangePassword,
+    ForgotPassword,
     TokenResponse,
+    LinkingRequiredResponse,
     MessageResponse
 )
 from app.api.auth import controllers_auth
@@ -26,17 +35,17 @@ async def signup(
     db: Session = Depends(get_db)
 ):
     """
-    User signup endpoint - creates account and sends OTP verification email.
+    Email + Password Signup - Creates account without role (onboarding required).
     
     Requirements:
     - Email must end with @flame.edu.in
     - Password must be at least 8 characters
-    - Role must be "student" or "staff"
     
     Process:
-    1. Creates user account (unverified)
+    1. Creates user account with auth_provider='password', role=NULL
     2. Sends 6-digit OTP to email
     3. User must verify email before login
+    4. After login, user must set role via /auth/set-role endpoint
     """
     try:
         log_request("/auth/signup", "POST")
@@ -50,6 +59,46 @@ async def signup(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during signup. Please try again."
+        )
+
+
+@router.post("/google-signup", response_model=TokenResponse)
+async def google_signup(
+    google_data: GoogleSignup,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    """
+    Google Signup - First-time registration with Google OAuth.
+    
+    Creates new account with auth_provider='google'.
+    User must complete onboarding (set role) after signup.
+    
+    Returns JWT with onboarding_required=True.
+    """
+    try:
+        log_request("/auth/google-signup", "POST")
+        result = await controllers_auth.signup_with_google(db, google_data)
+        
+        # Set HTTP-only cookie with JWT token
+        response.set_cookie(
+            key="access_token",
+            value=result["access_token"],
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite="lax",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        log_success("/auth/google-signup", f"Google signup: {google_data.email}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/google-signup", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during Google signup. Please try again."
         )
 
 
@@ -115,10 +164,12 @@ async def login(
     db: Session = Depends(get_db)
 ):
     """
-    User login with email and password.
+    Email + Password Login.
+    
+    Works for users with auth_provider='password' or 'google+password'.
+    Google-only users must use Google login.
     
     Returns JWT token in HTTP-only cookie and CSRF token in response.
-    Include CSRF token in X-CSRF-Token header for subsequent requests.
     """
     try:
         log_request("/auth/login", "POST")
@@ -129,7 +180,7 @@ async def login(
             key="access_token",
             value=result["access_token"],
             httponly=True,
-            secure=not settings.DEBUG,  # HTTPS only in production
+            secure=not settings.DEBUG,
             samesite="lax",
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
@@ -146,35 +197,41 @@ async def login(
         )
 
 
-@router.post("/google-login", response_model=TokenResponse)
+@router.post("/google-login", response_model=Union[TokenResponse, LinkingRequiredResponse])
 async def google_login(
     google_data: GoogleLogin,
     response: Response,
     db: Session = Depends(get_db)
 ):
     """
-    User login with Google OAuth.
+    Google OAuth Login for existing users.
     
-    Note: User must have signed up first. Google login does NOT auto-create accounts.
-    If account doesn't exist, user must sign up first with their role (student/staff).
+    Behavior:
+    - Google user with role → Normal login
+    - Google user without role → Onboarding required
+    - Password-only user → Linking required (secure flow)
+    - No user → Redirect to signup
     
-    Returns JWT token in HTTP-only cookie and CSRF token in response.
+    Returns JWT token OR linking_required response.
     """
     try:
         log_request("/auth/google-login", "POST")
         result = await controllers_auth.login_with_google(db, google_data)
         
-        # Set HTTP-only cookie with JWT token
-        response.set_cookie(
-            key="access_token",
-            value=result["access_token"],
-            httponly=True,
-            secure=not settings.DEBUG,  # HTTPS only in production
-            samesite="lax",
-            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
+        # Only set cookie if login successful (not linking required)
+        if "access_token" in result:
+            response.set_cookie(
+                key="access_token",
+                value=result["access_token"],
+                httponly=True,
+                secure=not settings.DEBUG,
+                samesite="lax",
+                max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            )
+            log_success("/auth/google-login", f"User Google login: {google_data.email}")
+        else:
+            log_success("/auth/google-login", f"Linking required: {google_data.email}")
         
-        log_success("/auth/google-login", f"User Google login: {google_data.email}")
         return result
     except HTTPException:
         raise
@@ -210,4 +267,162 @@ async def logout(response: Response):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during logout. Please try again."
+        )
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    forgot_data: ForgotPassword,
+    db: Session = Depends(get_db)
+):
+    """
+    Initiate password reset process.
+    
+    Only works for users with passwords (auth_provider='password' or 'google+password').
+    Google-only users cannot reset passwords.
+    
+    Sends password reset OTP to email if account exists and has password.
+    """
+    try:
+        log_request("/auth/forgot-password", "POST")
+        result = await controllers_auth.forgot_password(db, forgot_data)
+        log_success("/auth/forgot-password", f"Password reset requested: {forgot_data.email}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/forgot-password", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
+        )
+
+
+# ============ Protected Endpoints (Require Authentication) ============
+
+@router.post("/set-role", response_model=TokenResponse)
+async def set_role(
+    role_data: SetRole,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Set user role during onboarding (one-time operation).
+    
+    Works for users who haven't set their role yet (both Google and email+password signups).
+    After setting role, returns new JWT with role populated.
+    
+    Requires: JWT authentication
+    """
+    try:
+        log_request("/auth/set-role", "POST")
+        result = await controllers_auth.set_user_role(db, current_user["user_id"], role_data)
+        
+        # Update cookie with new token
+        response.set_cookie(
+            key="access_token",
+            value=result["access_token"],
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite="lax",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        log_success("/auth/set-role", f"Role set: {current_user['sub']} -> {role_data.role}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/set-role", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
+        )
+
+
+@router.post("/link-google", response_model=MessageResponse)
+async def link_google(
+    link_data: LinkGoogle,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Securely link Google account to existing password-based account.
+    
+    Requires password verification for security.
+    Upgrades auth_provider from 'password' to 'google+password'.
+    
+    Requires: JWT authentication
+    """
+    try:
+        log_request("/auth/link-google", "POST")
+        result = await controllers_auth.link_google_to_account(db, current_user["user_id"], link_data)
+        log_success("/auth/link-google", f"Google linked: {current_user['sub']}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/link-google", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
+        )
+
+
+@router.post("/set-password", response_model=MessageResponse)
+async def set_password(
+    password_data: SetPassword,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Set password for Google-only users.
+    
+    Enables email + password login for Google users.
+    Upgrades auth_provider from 'google' to 'google+password'.
+    
+    Requires: JWT authentication
+    """
+    try:
+        log_request("/auth/set-password", "POST")
+        result = await controllers_auth.set_user_password(db, current_user["user_id"], password_data)
+        log_success("/auth/set-password", f"Password set: {current_user['sub']}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/set-password", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
+        )
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    password_data: ChangePassword,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Change password for users with existing passwords.
+    
+    Works for auth_provider='password' and 'google+password'.
+    Requires current password verification.
+    
+    Requires: JWT authentication
+    """
+    try:
+        log_request("/auth/change-password", "POST")
+        result = await controllers_auth.change_user_password(db, current_user["user_id"], password_data)
+        log_success("/auth/change-password", f"Password changed: {current_user['sub']}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error("POST /auth/change-password", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred. Please try again."
         )

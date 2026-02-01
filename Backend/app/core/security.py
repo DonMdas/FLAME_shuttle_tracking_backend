@@ -100,7 +100,7 @@ async def get_current_user(
     """
     Dependency to get the current authenticated user.
     Supports both cookie-based (preferred) and bearer token authentication.
-    Returns user info with role (super_admin or admin).
+    Returns user info including role (which may be None during onboarding).
     """
     token = None
     
@@ -150,7 +150,11 @@ async def get_current_user(
                     )
     
     username: str = payload.get("sub")
-    role: str = payload.get("role", "admin")
+    user_id: int = payload.get("user_id")
+    role: Optional[str] = payload.get("role")  # Can be None during onboarding
+    auth_provider: Optional[str] = payload.get("auth_provider")
+    onboarding_required: bool = payload.get("onboarding_required", False)
+    user_type: str = payload.get("user_type", "user")
     
     if username is None:
         raise HTTPException(
@@ -159,7 +163,16 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    return {"username": username, "role": role, "csrf_token": payload.get("csrf")}
+    return {
+        "username": username,
+        "sub": username,
+        "user_id": user_id,
+        "role": role,
+        "auth_provider": auth_provider,
+        "onboarding_required": onboarding_required,
+        "user_type": user_type,
+        "csrf_token": payload.get("csrf")
+    }
 
 
 async def get_current_user_no_csrf(
@@ -192,7 +205,11 @@ async def get_current_user_no_csrf(
     
     payload = verify_token(token)
     username: str = payload.get("sub")
-    role: str = payload.get("role", "admin")
+    user_id: int = payload.get("user_id")
+    role: Optional[str] = payload.get("role")  # Can be None during onboarding
+    auth_provider: Optional[str] = payload.get("auth_provider")
+    onboarding_required: bool = payload.get("onboarding_required", False)
+    user_type: str = payload.get("user_type", "user")
     
     if username is None:
         raise HTTPException(
@@ -201,7 +218,16 @@ async def get_current_user_no_csrf(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    return {"username": username, "role": role, "csrf_token": payload.get("csrf")}
+    return {
+        "username": username,
+        "sub": username,
+        "user_id": user_id,
+        "role": role,
+        "auth_provider": auth_provider,
+        "onboarding_required": onboarding_required,
+        "user_type": user_type,
+        "csrf_token": payload.get("csrf")
+    }
 
 
 async def get_super_admin(current_user: dict = Depends(get_current_user)) -> dict:

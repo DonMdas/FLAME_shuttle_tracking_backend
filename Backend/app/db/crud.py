@@ -497,14 +497,34 @@ def get_users(db: Session, skip: int = 0, limit: int = 1000, role: Optional[str]
     return query.offset(skip).limit(limit).all()
 
 
-def create_user(db: Session, email: str, hashed_password: Optional[str], role: str, google_id: Optional[str] = None) -> User:
-    """Create a new user"""
+def create_user(
+    db: Session, 
+    email: str, 
+    hashed_password: Optional[str], 
+    role: Optional[str], 
+    auth_provider: str,
+    google_id: Optional[str] = None,
+    is_email_verified: bool = False
+) -> User:
+    """
+    Create a new user with specified authentication provider.
+    
+    Args:
+        db: Database session
+        email: User email
+        hashed_password: Hashed password (None for Google-only users)
+        role: User role (None for Google users during onboarding)
+        auth_provider: 'password', 'google', or 'google+password'
+        google_id: Google OAuth ID (for Google users)
+        is_email_verified: Whether email is verified (True for Google users)
+    """
     db_user = User(
         email=email.lower(),
         hashed_password=hashed_password,
-        role=role.lower(),
+        role=role.lower() if role else None,
+        auth_provider=auth_provider,
         google_id=google_id,
-        is_verified=False,  # Will be verified via OTP
+        is_email_verified=is_email_verified,
         is_active=True
     )
     db.add(db_user)
@@ -532,7 +552,7 @@ def verify_user(db: Session, user_id: int) -> Optional[User]:
     if not db_user:
         return None
     
-    db_user.is_verified = True
+    db_user.is_email_verified = True
     db_user.otp = None
     db_user.otp_created_at = None
     db.commit()
@@ -540,13 +560,96 @@ def verify_user(db: Session, user_id: int) -> Optional[User]:
     return db_user
 
 
+def set_user_role(db: Session, user_id: int, role: str) -> Optional[User]:
+    """
+    Set user's role (one-time operation during onboarding).
+    Only works if role is currently NULL.
+    """
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    if db_user.role is not None:
+        return None  # Role already set, cannot change via this method
+    
+    db_user.role = role.lower()
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
 def update_user_role(db: Session, user_id: int, role: str) -> Optional[User]:
-    """Update user's role (admin only)"""
+    """Update user's role (admin only - can change existing roles)"""
     db_user = get_user(db, user_id)
     if not db_user:
         return None
     
     db_user.role = role.lower()
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def set_user_password(db: Session, user_id: int, hashed_password: str) -> Optional[User]:
+    """
+    Set password for a user (Google users enabling password login).
+    Updates auth_provider from 'google' to 'google+password'.
+    """
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    if db_user.hashed_password is not None:
+        return None  # Password already exists
+    
+    db_user.hashed_password = hashed_password
+    
+    # Update auth provider
+    if db_user.auth_provider == "google":
+        db_user.auth_provider = "google+password"
+    
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def update_user_password(db: Session, user_id: int, hashed_password: str) -> Optional[User]:
+    """
+    Update existing password (for password reset or change password).
+    User must already have a password set.
+    """
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    if db_user.hashed_password is None:
+        return None  # No password to update
+    
+    db_user.hashed_password = hashed_password
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def link_google_account(db: Session, user_id: int, google_id: str) -> Optional[User]:
+    """
+    Link Google account to existing password-based user.
+    Updates auth_provider from 'password' to 'google+password'.
+    """
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    
+    if db_user.google_id is not None:
+        return None  # Google already linked
+    
+    db_user.google_id = google_id
+    db_user.is_email_verified = True  # Google accounts are email-verified
+    
+    # Update auth provider
+    if db_user.auth_provider == "password":
+        db_user.auth_provider = "google+password"
+    
     db.commit()
     db.refresh(db_user)
     return db_user
