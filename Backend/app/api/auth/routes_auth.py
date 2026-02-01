@@ -50,7 +50,7 @@ async def signup(
     try:
         log_request("/auth/signup", "POST")
         result = await controllers_auth.signup_user(db, signup_data)
-        log_success("/auth/signup", f"User signup: {signup_data.email}")
+        log_success("/auth/signup", f"User signup: {signup_data.email}", user=signup_data.email)
         return result
     except HTTPException:
         raise
@@ -90,7 +90,7 @@ async def google_signup(
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
         
-        log_success("/auth/google-signup", f"Google signup: {google_data.email}")
+        log_success("/auth/google-signup", f"Google signup: {google_data.email}", user=google_data.email)
         return result
     except HTTPException:
         raise
@@ -116,7 +116,7 @@ async def verify_otp(
     try:
         log_request("/auth/verify-otp", "POST")
         result = await controllers_auth.verify_otp(db, verify_data)
-        log_success("/auth/verify-otp", f"OTP verified: {verify_data.email}")
+        log_success("/auth/verify-otp", f"OTP verified: {verify_data.email}", user=verify_data.email)
         return result
     except HTTPException:
         raise
@@ -145,7 +145,7 @@ async def resend_otp(
     try:
         log_request("/auth/resend-otp", "POST")
         result = await controllers_auth.resend_otp(db, request.email)
-        log_success("/auth/resend-otp", f"OTP resent: {request.email}")
+        log_success("/auth/resend-otp", f"OTP resent: {request.email}", user=request.email)
         return result
     except HTTPException:
         raise
@@ -185,7 +185,7 @@ async def login(
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
         
-        log_success("/auth/login", f"User login: {credentials.email}")
+        log_success("/auth/login", f"User login: {credentials.email}", user=credentials.email)
         return result
     except HTTPException:
         raise
@@ -228,9 +228,9 @@ async def google_login(
                 samesite="lax",
                 max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
             )
-            log_success("/auth/google-login", f"User Google login: {google_data.email}")
+            log_success("/auth/google-login", f"User Google login: {google_data.email}", user=google_data.email)
         else:
-            log_success("/auth/google-login", f"Linking required: {google_data.email}")
+            log_success("/auth/google-login", f"Linking required: {google_data.email}", user=google_data.email)
         
         return result
     except HTTPException:
@@ -286,7 +286,7 @@ async def forgot_password(
     try:
         log_request("/auth/forgot-password", "POST")
         result = await controllers_auth.forgot_password(db, forgot_data)
-        log_success("/auth/forgot-password", f"Password reset requested: {forgot_data.email}")
+        log_success("/auth/forgot-password", f"Password reset requested: {forgot_data.email}", user=forgot_data.email)
         return result
     except HTTPException:
         raise
