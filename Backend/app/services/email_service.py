@@ -67,18 +67,20 @@ class EmailService:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
             return False
     
-    def send_otp_email(self, to_email: str, otp: str) -> bool:
+    def send_otp_email(self, to_email: str, otp: str, subject: Optional[str] = None) -> bool:
         """
         Send OTP verification email.
         
         Args:
             to_email: Recipient email address
             otp: 6-digit OTP code
+            subject: Email subject (optional, defaults to verification subject)
         
         Returns:
             bool: True if email sent successfully, False otherwise
         """
-        subject = "Verify Your Email - Shuttle Tracker"
+        if subject is None:
+            subject = "Verify Your Email - Shuttle Tracker"
         
         text_content = f"""
         Hello,

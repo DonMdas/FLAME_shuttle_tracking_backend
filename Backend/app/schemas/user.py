@@ -85,9 +85,9 @@ class ForgotPassword(BaseModel):
 
 
 class ResetPassword(BaseModel):
-    """Schema for password reset with token"""
+    """Schema for password reset with OTP"""
     email: EmailStr
-    reset_token: str = Field(..., description="Password reset token from email")
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP from email")
     new_password: str = Field(..., min_length=8, description="New password (min 8 characters)")
 
 
