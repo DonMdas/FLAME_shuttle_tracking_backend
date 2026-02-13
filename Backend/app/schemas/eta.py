@@ -53,7 +53,7 @@ class ETAUpcomingResponse(BaseModel):
     vehicle_id: int = Field(..., description="Vehicle identifier")
     timestamp_utc: str = Field(..., description="Timestamp of the response in UTC")
     current_location: Coordinate = Field(..., description="Current vehicle location")
-    route_id: str = Field(..., description="Active route identifier")
+    route_id: int = Field(..., description="Active route identifier")
     direction: str = Field(..., description="Direction of travel (from -> to)")
     current_segment: Optional[SegmentProgress] = Field(
         None,

@@ -1,28 +1,29 @@
 from sqlalchemy.orm import Session
 from typing import List
 from fastapi import HTTPException
-from db import crud
-from schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, ScheduleWithVehicle
-from schemas.route import RouteStopsResponse, StationInfo
-from services.gps import gps_service
+from app.db import crud
+from app.schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, ScheduleWithVehicle
+from app.schemas.route import RouteStopsResponse, StationInfo
+from app.services.gps import gps_service
 from app.core.route_config import ROUTE_DEFINITIONS, STATIONS
+from app.core.constants import RouteType
 
 
-async def get_active_schedules_with_vehicles(db: Session, schedule_type: str = "regular") -> List[ScheduleWithVehicle]:
+async def get_active_schedules_with_vehicles(db: Session, schedule_type: str = RouteType.STUDENT.value) -> List[ScheduleWithVehicle]:
     """
     Get all active schedules with their vehicle details.
     Only returns schedules marked as active.
-    Defaults to regular schedules. Pass schedule_type="staff" for staff schedules.
+    Defaults to student schedules. Pass schedule_type="staff" for staff schedules.
     """
     schedules = crud.get_active_schedules(db, schedule_type=schedule_type)
     return schedules
 
 
-async def get_available_vehicles(db: Session, schedule_type: str = "regular") -> List[VehiclePublic]:
+async def get_available_vehicles(db: Session, schedule_type: str = RouteType.STUDENT.value) -> List[VehiclePublic]:
     """
     Get list of vehicles that have active schedules.
     Only returns vehicles that are active and have active schedules.
-    Defaults to regular schedules. Pass schedule_type="staff" for staff schedules.
+    Defaults to student schedules. Pass schedule_type="staff" for staff schedules.
     No sensitive data (tokens) included.
     """
     # Get active schedules (filtered by type)
@@ -147,32 +148,34 @@ async def get_all_vehicles_locations(db: Session) -> List[VehicleLocation]:
     return locations
 
 
-async def get_route_stops_info(route_id: str) -> RouteStopsResponse:
+async def get_route_stops_info(db: Session, route_id: int) -> RouteStopsResponse:
     """
     Get all station information for a given route.
     Returns station names and coordinates in order.
     """
-    # Check if route exists
-    route_def = ROUTE_DEFINITIONS.get(route_id)
-    if not route_def:
-        raise HTTPException(status_code=404, detail=f"Route '{route_id}' not found")
+    # Get route from database
+    route = crud.get_route(db, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail=f"Route {route_id} not found")
     
-    # Get station details for all stops in route
-    stops_info = []
-    for stop_id in route_def["stops"]:
-        station = STATIONS.get(stop_id)
-        if station:
-            stops_info.append(StationInfo(
-                id=station.id,
-                name=station.name,
-                lat=station.lat,
-                lon=station.lon
-            ))
+    # Get ordered stops for the route
+    stops = crud.get_route_stops_ordered(db, route_id)
+    
+    # Convert to StationInfo format
+    stops_info = [
+        StationInfo(
+            id=stop["station_id"],
+            name=stop["station_name"],
+            lat=stop["latitude"],
+            lon=stop["longitude"]
+        )
+        for stop in stops
+    ]
     
     return RouteStopsResponse(
-        route_id=route_def["route_id"],
-        route_name=route_def["name"],
-        from_location=route_def["from_location"],
-        to_location=route_def["to_location"],
+        route_id=route.id,
+        route_name=route.name,
+        from_location=route.from_location,
+        to_location=route.to_location,
         stops=stops_info
     )

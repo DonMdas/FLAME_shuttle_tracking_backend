@@ -10,6 +10,8 @@ from app.api.admin.routes_admin import router as admin_router
 from app.api.client.routes_client import router as client_router
 from app.api.client.routes_eta import router as eta_router
 from app.api.auth.routes_auth import router as auth_router
+from app.api.admin.routes_feedback import router as admin_feedback_router
+from app.api.client.routes_feedback import router as client_feedback_router
 from app.services.vehicle_sync import vehicle_sync_service
 
 # Create FastAPI application
@@ -133,6 +135,8 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(client_router, prefix="/api")
 app.include_router(eta_router, prefix="/api/client")
 app.include_router(auth_router, prefix="/api")
+app.include_router(admin_feedback_router, prefix="/api")
+app.include_router(client_feedback_router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -155,6 +159,7 @@ async def startup_event():
         logger.info(f"📍 Client endpoints: /api/client/*")
         logger.info(f"📍 ETA endpoints: /api/client/eta/*")
         logger.info(f"� Auth endpoints: /api/auth/*")
+        logger.info(f"💬 Feedback endpoints: /api/admin/feedback/* and /api/client/feedback/*")
         logger.info(f"📄 API documentation: /docs")
         logger.info("=" * 60)
         
@@ -166,6 +171,7 @@ async def startup_event():
         print(f"📍 Client endpoints: /api/client/*")
         print(f"📍 ETA endpoints: /api/client/eta/*")
         print(f"📍 Auth endpoints: /api/auth/*")
+        print(f"💬 Feedback: /api/admin/feedback/* and /api/client/feedback/*")
         print(f"📄 Logs: logs/shuttle_tracker_*.log")
         
     except Exception as e:

@@ -22,10 +22,11 @@ async def get_active_schedules(
 ):
     """
     Get all active schedules with vehicle details.
+    Includes both one-time and recurring schedules.
     
     Authentication: Required
     Returns schedules based on user's role:
-    - student role -> regular schedules
+    - student role -> student schedules
     - staff role -> staff schedules
     
     **Security:**
@@ -33,9 +34,35 @@ async def get_active_schedules(
     - Role is extracted from token (server-side)
     """
     # Use user's role from JWT token (trusted source)
-    schedule_type = "staff" if current_user.get("role") == "staff" else "regular"
+    schedule_type = RouteType.get_for_user_role(current_user.get("role"))
     
     return await controllers_client.get_active_schedules_with_vehicles(db, schedule_type)
+
+
+@router.get("/schedules/today", response_model=List[ScheduleWithVehicle])
+async def get_today_schedules(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_authenticated_user)
+):
+    """
+    Get schedules running today (includes recurring schedules for current day).
+    
+    Authentication: Required
+    Returns schedules based on user's role:
+    - student role -> student schedules
+    - staff role -> staff schedules
+    
+    **Security:**
+    - Requires valid JWT token
+    - Role is extracted from token (server-side)
+    """
+    from app.db import crud
+    from app.core.constants import RouteType
+    
+    # Use user's role from JWT token (trusted source)
+    schedule_type = RouteType.get_for_user_role(current_user.get("role"))
+    
+    return crud.get_schedules_for_today(db, schedule_type=schedule_type)
 
 
 @router.get("/vehicles", response_model=List[VehiclePublic])
@@ -48,7 +75,7 @@ async def get_vehicles_list(
     
     Authentication: Required
     Returns vehicles based on user's role:
-    - student role -> vehicles with regular schedules
+    - student role -> vehicles with student schedules
     - staff role -> vehicles with staff schedules
     
     **Security:**
@@ -56,7 +83,7 @@ async def get_vehicles_list(
     - Role is extracted from token (server-side)
     """
     # Use user's role from JWT token (trusted source)
-    schedule_type = "staff" if current_user.get("role") == "staff" else "regular"
+    schedule_type = RouteType.get_for_user_role(current_user.get("role"))
     
     return await controllers_client.get_available_vehicles(db, schedule_type)
 
@@ -105,7 +132,8 @@ async def get_all_locations(
 
 @router.get("/routes/{route_id}/stops", response_model=RouteStopsResponse)
 async def get_route_stops(
-    route_id: str,
+    route_id: int,
+    db: Session = Depends(get_db),
     current_user: dict = Depends(get_authenticated_user)
 ):
     """
@@ -114,4 +142,4 @@ async def get_route_stops(
     
     Authentication: Required
     """
-    return await controllers_client.get_route_stops_info(route_id)
+    return await controllers_client.get_route_stops_info(db, route_id)
