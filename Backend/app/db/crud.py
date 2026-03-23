@@ -377,8 +377,7 @@ def create_schedule(db: Session, schedule: ScheduleCreate) -> Schedule:
         schedule_type=schedule.schedule_type,
         is_active=schedule.is_active,
         is_recurring=schedule.is_recurring,
-        start_date=schedule.start_date,
-        end_date=schedule.end_date
+        date=schedule.date
     )
     db.add(db_schedule)
     db.flush()  # Flush to get the schedule ID
@@ -483,12 +482,7 @@ def get_schedules_for_day(db: Session, day_of_week: str, schedule_type: Optional
         )
     )
     
-    # Apply date range filters for recurring schedules
-    recurring_query = recurring_query.filter(
-        (Schedule.start_date == None) | (Schedule.start_date <= today)
-    ).filter(
-        (Schedule.end_date == None) | (Schedule.end_date >= today)
-    )
+    # No date range filter needed for recurring schedules — they run indefinitely on specified days
     
     # Apply schedule type filter if provided
     if schedule_type:
@@ -496,7 +490,7 @@ def get_schedules_for_day(db: Session, day_of_week: str, schedule_type: Optional
     
     recurring_schedules = recurring_query.all()
     
-    # Query for non-recurring schedules with start_date = today
+    # Query for non-recurring schedules with date = today
     non_recurring_query = (
         db.query(Schedule)
         .options(
@@ -506,7 +500,7 @@ def get_schedules_for_day(db: Session, day_of_week: str, schedule_type: Optional
         .filter(
             Schedule.is_active == True,
             Schedule.is_recurring == False,
-            Schedule.start_date == today
+            Schedule.date == today
         )
     )
     

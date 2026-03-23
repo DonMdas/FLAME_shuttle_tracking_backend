@@ -442,7 +442,7 @@ async def create_schedule(
 ):
     """Create a new schedule (supports both one-time and recurring). Admin only."""
     # Verify route exists in database
-    route = crud.get_route_by_id(db, schedule.route_id)
+    route = crud.get_route(db, schedule.route_id)
     if not route:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -477,20 +477,11 @@ async def update_schedule(
     """Update a schedule (including recurring days). Admin only."""
     # If route_id is being updated, verify it exists
     if schedule_update.route_id is not None:
-        route = crud.get_route_by_id(db, schedule_update.route_id)
+        route = crud.get_route(db, schedule_update.route_id)
         if not route:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Route with ID {schedule_update.route_id} not found"
-            )
-    
-    # If vehicle_id is being updated, verify it exists
-    if schedule_update.vehicle_id is not None:
-        vehicle = crud.get_vehicle(db, schedule_update.vehicle_id)
-        if not vehicle:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Vehicle with ID {schedule_update.vehicle_id} not found"
             )
     
     # Additional validation for recurring schedules

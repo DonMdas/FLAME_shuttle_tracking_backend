@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, validator
 from typing import Dict, List, Optional
-from datetime import datetime, time, date
+from datetime import datetime, time
+from datetime import date as date_type  # Alias to avoid shadowing with field name
 from app.core.constants import RouteType
 
 
@@ -135,8 +136,7 @@ class ScheduleBase(BaseModel):
     schedule_type: RouteType = RouteType.STUDENT  # Type: "student", "staff", or "internal"
     is_active: bool = True
     is_recurring: bool = False
-    start_date: Optional[date] = None  # Start date for recurring or execution date for one-time
-    end_date: Optional[date] = None  # End date for recurring (NULL = no end)
+    date: Optional[date_type] = None  # For non-recurring: the specific date the schedule runs on. Ignored for recurring.
 
 
 class ScheduleCreate(ScheduleBase):
@@ -161,18 +161,27 @@ class ScheduleCreate(ScheduleBase):
                     raise ValueError(f'Invalid day: {day}. Must be one of {valid_days}')
         
         return [day.lower() for day in v] if v else []
+    
+    @validator('date', always=True)
+    def validate_date(cls, v, values):
+        """Validate date: required for non-recurring, ignored for recurring"""
+        is_recurring = values.get('is_recurring', False)
+        
+        if not is_recurring and v is None:
+            raise ValueError('date is required for non-recurring schedules')
+        
+        return v
 
 
 class ScheduleUpdate(BaseModel):
     """Schema for updating a schedule (admin only)"""
-    vehicle_id: Optional[int] = None
+    # Note: vehicle_id is NOT updateable - create a new schedule if you need to change the vehicle
     start_time: Optional[time] = None
     route_id: Optional[int] = None  # Route ID from the routes table
     schedule_type: Optional[RouteType] = None  # Type: "student", "staff", or "internal"
     is_active: Optional[bool] = None
     is_recurring: Optional[bool] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    date: Optional[date_type] = None  # For non-recurring: the specific date. Ignored for recurring.
     repeat_days: Optional[List[str]] = None  # ['monday', 'wednesday', 'friday']
     
     @validator('repeat_days')

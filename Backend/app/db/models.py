@@ -184,8 +184,7 @@ class Schedule(Base):
     
     # Recurring schedule support
     is_recurring = Column(Boolean, default=False, nullable=False, index=True)
-    start_date = Column(Date, nullable=True)  # Start date for recurring schedules or execution date for one-time
-    end_date = Column(Date, nullable=True)  # End date for recurring schedules (NULL = no end)
+    date = Column(Date, nullable=True)  # For non-recurring: the specific date the schedule runs on. Not used for recurring schedules.
     
     __table_args__ = (
         CheckConstraint(
