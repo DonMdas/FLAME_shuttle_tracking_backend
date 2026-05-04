@@ -23,7 +23,7 @@ Backend/
 │   │   │   └── controllers_admin.py # Admin business logic
 │   │   │
 │   │   └── client/
-│   │       ├── routes_client.py     # Public client routes
+│   │       ├── routes_client.py     # Authenticated client routes
 │   │       └── controllers_client.py # Client business logic
 │   │
 │   ├── core/
@@ -90,6 +90,10 @@ Interactive API documentation is available at:
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
+Reference docs:
+- [Client API documentation](copilot_files/API_DOCUMENTATION_CLIENT.md)
+- [System overview and flow](copilot_files/SYSTEM_OVERVIEW_AND_FLOW.md)
+
 ## 🔐 Admin API Endpoints
 
 All admin endpoints require JWT authentication via Bearer token.
@@ -138,10 +142,10 @@ All admin endpoints require JWT authentication via Bearer token.
 
 ## 🌐 Client API Endpoints
 
-All client endpoints are **public** - no authentication required.
+All client endpoints require authentication. The authenticated user role determines which schedules and vehicles are visible.
 
 **GET** `/api/client/vehicles`
-- Get list of available vehicles (basic info only)
+- Get list of available vehicles for the authenticated role
 
 **GET** `/api/client/vehicles/{id}/location`
 - Get real-time location for specific vehicle
@@ -151,6 +155,33 @@ All client endpoints are **public** - no authentication required.
 
 **GET** `/api/client/vehicles/locations/all`
 - Get live locations for all vehicles (for map view)
+
+**GET** `/api/client/schedules`
+- Get role-filtered schedules with vehicle details
+
+**GET** `/api/client/schedules/today`
+- Get role-filtered schedules running today
+
+**GET** `/api/client/routes/{route_id}/stops`
+- Get ordered stops for a route
+
+**GET** `/api/client/eta/upcoming`
+- Get ETA for upcoming stops of a vehicle
+
+**POST** `/api/client/eta/by-coordinates`
+- Calculate ETA from an origin to multiple coordinates
+
+**POST** `/api/client/feedback/`
+- Submit client feedback
+
+**GET** `/api/client/feedback/my-history`
+- Read the authenticated user's feedback history
+
+**PATCH** `/api/client/feedback/{feedback_id}`
+- Update own feedback within the allowed window
+
+**DELETE** `/api/client/feedback/{feedback_id}`
+- Delete own feedback within the allowed window
 
 ## 🔧 Usage Examples
 

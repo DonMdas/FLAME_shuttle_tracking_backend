@@ -7,6 +7,7 @@ from schemas.vehicle import VehiclePublic, VehicleLocation, VehicleStatus, Sched
 from schemas.route import RouteStopsResponse
 from api.client import controllers_client
 from app.core.security import get_authenticated_user
+from app.core.constants import RouteType
 
 router = APIRouter(prefix="/client", tags=["Client"])
 
@@ -57,8 +58,6 @@ async def get_today_schedules(
     - Role is extracted from token (server-side)
     """
     from app.db import crud
-    from app.core.constants import RouteType
-    
     # Use user's role from JWT token (trusted source)
     schedule_type = RouteType.get_for_user_role(current_user.get("role"))
     
